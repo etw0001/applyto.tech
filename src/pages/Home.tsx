@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/hooks/use-auth";
+import { useApplications } from "@/hooks/use-applications";
+import { supabase } from "@/lib/supabase";
 import {
   Plus,
   Building2,
@@ -57,13 +60,13 @@ const statusConfig: Record<Status, { label: string; color: string; bgColor: stri
   },
   interviewing: {
     label: "Interviewing",
-    color: "text-sky-400/90",
+    color: "text-sky-400",
     bgColor: "bg-sky-500/10",
     icon: Clock,
   },
   offered: {
     label: "Offered",
-    color: "text-emerald-500/80",
+    color: "text-emerald-500",
     bgColor: "bg-emerald-500/10",
     icon: CheckCircle2,
   },
@@ -156,8 +159,32 @@ function GoogleIcon() {
 }
 
 export default function Home() {
+  // Helper function to get today's date in YYYY-MM-DD format (local timezone)
+  const getTodayDateString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Supabase auth
+  const { user: authUser, loading: authLoading, signInWithGoogle, signOut: signOutUser } = useAuth();
+  const isSignedIn = !!authUser;
+
+  // Supabase applications
+  const {
+    applications: supabaseApplications,
+    loading: appsLoading,
+    addApplication: addApplicationToDB,
+    updateApplication: updateApplicationInDB,
+    deleteApplication: deleteApplicationFromDB,
+  } = useApplications(authUser?.id);
+
+  // Use Supabase data if signed in, otherwise use mock data
+  const applications = isSignedIn ? supabaseApplications : mockApplications;
+
   const [activeTab, setActiveTab] = useState<"recommended" | "custom">("custom");
-  const [applications, setApplications] = useState<Application[]>(mockApplications);
   const [showForm, setShowForm] = useState(false);
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
@@ -165,13 +192,24 @@ export default function Home() {
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isSignedIn, setIsSignedIn] = useState(false);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Initialize theme immediately to prevent flashing
   const [darkMode, setDarkMode] = useState(() => {
-    return document.documentElement.classList.contains('dark');
+    // Apply theme class immediately before React renders
+    const saved = localStorage.getItem('theme');
+    const isDark = saved ? saved === 'dark' : false;
+
+    // Apply immediately to prevent flash
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+
+    return isDark;
   });
   const [formData, setFormData] = useState({
     company: "",
@@ -180,6 +218,7 @@ export default function Home() {
     status: "applied" as Status,
     dateApplied: new Date().toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }),
   });
+  const [dateInputValue, setDateInputValue] = useState(getTodayDateString());
   const [openStatusDropdown, setOpenStatusDropdown] = useState<string | null>(null);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
@@ -187,6 +226,7 @@ export default function Home() {
   const filterRef = useRef<HTMLDivElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const formStatusDropdownRef = useRef<HTMLDivElement>(null);
 
   // Reset form and close status dropdown when form is closed
   const resetForm = () => {
@@ -197,12 +237,16 @@ export default function Home() {
       status: "applied" as Status,
       dateApplied: new Date().toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }),
     });
+    setDateInputValue(getTodayDateString());
     setStatusDropdownOpen(false);
   };
 
   useEffect(() => {
     if (!showForm) {
       resetForm();
+    } else {
+      // When form opens, set date to today
+      setDateInputValue(getTodayDateString());
     }
   }, [showForm]);
   const statusDropdownRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -227,13 +271,93 @@ export default function Home() {
           setOpenStatusDropdown(null);
         }
       }
+      // Close form status dropdown if clicking outside
+      if (statusDropdownOpen && formStatusDropdownRef.current && !formStatusDropdownRef.current.contains(target)) {
+        setStatusDropdownOpen(false);
+      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [openStatusDropdown]);
+  }, [openStatusDropdown, statusDropdownOpen]);
+
+  // Sync user profile from Supabase
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      if (authUser) {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', authUser.id)
+            .single();
+
+          if (error) throw error;
+
+          if (data) {
+            setUser({
+              name: data.name || authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'User',
+              email: data.email || authUser.email || '',
+              avatar: data.avatar_url || authUser.user_metadata?.avatar_url || (data.name?.[0] || authUser.email?.[0] || 'U').toUpperCase(),
+            });
+
+            // Load theme preference from database (only if it exists)
+            if (data.theme) {
+              const isDark = data.theme === 'dark';
+              // Only update if different to avoid flashing
+              setDarkMode(prev => prev !== isDark ? isDark : prev);
+              // Also update localStorage to keep in sync
+              localStorage.setItem('theme', data.theme);
+            } else {
+              // If no theme in DB yet, save current preference to DB
+              const currentTheme = darkMode ? 'dark' : 'light';
+              supabase
+                .from('profiles')
+                .update({ theme: currentTheme })
+                .eq('id', authUser.id)
+                .then(({ error }) => {
+                  if (!error) {
+                    localStorage.setItem('theme', currentTheme);
+                  }
+                });
+            }
+          } else {
+            // Fallback to auth user metadata
+            setUser({
+              name: authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'User',
+              email: authUser.email || '',
+              avatar: authUser.user_metadata?.avatar_url || (authUser.email?.[0] || 'U').toUpperCase(),
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching user profile:', error);
+          // Fallback to auth user metadata
+          setUser({
+            name: authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'User',
+            email: authUser.email || '',
+            avatar: authUser.user_metadata?.avatar_url || (authUser.email?.[0] || 'U').toUpperCase(),
+          });
+        }
+      } else {
+        setUser(null);
+        // When signed out, use localStorage (don't reset if already set)
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+          const shouldBeDark = savedTheme === 'dark';
+          // Only update if different to avoid unnecessary re-renders
+          setDarkMode(prev => prev !== shouldBeDark ? shouldBeDark : prev);
+        }
+        // Don't reset to default when signing out - keep current theme
+      }
+    };
+
+    fetchUserProfile();
+  }, [authUser]);
 
   useEffect(() => {
+    // Skip if this is the initial render (theme already applied in useState)
+    const isInitialMount = document.documentElement.classList.contains('dark') === darkMode;
+
     // Disable transitions during theme change to prevent flashing
     document.documentElement.classList.add('no-transitions');
 
@@ -249,29 +373,74 @@ export default function Home() {
         document.documentElement.classList.remove('no-transitions');
       });
     });
-  }, [darkMode]);
 
-  const handleGoogleSignIn = () => {
-    setUser({
-      name: "Alex Johnson",
-      email: "alex.johnson@gmail.com",
-      avatar: "AJ"
-    });
-    setIsSignedIn(true);
+    // Save theme preference to database if signed in, otherwise to localStorage
+    // Use a small delay to debounce rapid changes
+    const timeoutId = setTimeout(() => {
+      if (isSignedIn && authUser) {
+        supabase
+          .from('profiles')
+          .update({ theme: darkMode ? 'dark' : 'light' })
+          .eq('id', authUser.id)
+          .then(({ error }) => {
+            if (error) {
+              console.error('Error saving theme preference:', error);
+            }
+          });
+      }
+      // Always update localStorage
+      localStorage.setItem('theme', darkMode ? 'dark' : 'light');
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [darkMode, isSignedIn, authUser]);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      console.error('Error signing in:', error);
+    }
   };
 
-  const handleSignOut = () => {
-    setUser(null);
-    setIsSignedIn(false);
-    setShowUserMenu(false);
+  const handleSignOut = async () => {
+    try {
+      await signOutUser();
+      setUser(null);
+      setShowUserMenu(false);
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
   };
 
-  const handleDeleteAccount = () => {
-    setApplications([]);
-    setUser(null);
-    setIsSignedIn(false);
-    setShowDeleteConfirm(false);
-    setShowSettings(false);
+  const handleDeleteAccount = async () => {
+    try {
+      if (isSignedIn && authUser) {
+        // Delete all user's applications
+        const { error: appsError } = await supabase
+          .from('applications')
+          .delete()
+          .eq('user_id', authUser.id);
+
+        if (appsError) throw appsError;
+
+        // Delete user profile
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', authUser.id);
+
+        if (profileError) throw profileError;
+
+        // Sign out the user
+        await signOutUser();
+      }
+      setUser(null);
+      setShowDeleteConfirm(false);
+      setShowSettings(false);
+    } catch (error) {
+      console.error('Error deleting account:', error);
+    }
   };
 
   const handleExportData = () => {
@@ -284,32 +453,57 @@ export default function Home() {
     a.click();
   };
 
-  const handleAddApplication = () => {
+  const handleAddApplication = async () => {
     if (!formData.company || !formData.position) return;
 
-    const newApp: Application = {
-      id: Date.now().toString(),
-      ...formData,
-    };
-    setApplications([newApp, ...applications]);
+    try {
+      if (isSignedIn) {
+        await addApplicationToDB(formData);
+      } else {
+        // Fallback for mock data when not signed in
+        const newApp: Application = {
+          id: Date.now().toString(),
+          ...formData,
+        };
+        // Note: This won't persist when using Supabase, but allows testing UI
+      }
 
-    // Show success animation, then close form (form will reset via useEffect)
-    setShowSuccessAnimation(true);
-    setTimeout(() => {
-      setShowSuccessAnimation(false);
-      setShowForm(false);
-    }, 800);
+      // Show success animation, then close form (form will reset via useEffect)
+      setShowSuccessAnimation(true);
+      setTimeout(() => {
+        setShowSuccessAnimation(false);
+        setShowForm(false);
+      }, 800);
+    } catch (error) {
+      console.error('Error adding application:', error);
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setApplications(applications.filter(app => app.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      if (isSignedIn) {
+        await deleteApplicationFromDB(id);
+      } else {
+        // Fallback for mock data when not signed in
+        // Note: This won't persist when using Supabase, but allows testing UI
+      }
+    } catch (error) {
+      console.error('Error deleting application:', error);
+    }
   };
 
-  const handleStatusChange = (id: string, newStatus: Status) => {
-    setApplications(applications.map(app =>
-      app.id === id ? { ...app, status: newStatus } : app
-    ));
-    setOpenStatusDropdown(null); // Close dropdown after selection
+  const handleStatusChange = async (id: string, newStatus: Status) => {
+    try {
+      if (isSignedIn) {
+        await updateApplicationInDB(id, { status: newStatus });
+      } else {
+        // Fallback for mock data when not signed in
+        // Note: This won't persist when using Supabase, but allows testing UI
+      }
+      setOpenStatusDropdown(null); // Close dropdown after selection
+    } catch (error) {
+      console.error('Error updating status:', error);
+    }
   };
 
   const filteredAndSortedApplications = applications
@@ -431,8 +625,12 @@ export default function Home() {
                     whileTap={{ scale: 0.98 }}
                     data-testid="button-user-menu"
                   >
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-white text-xs font-medium">
-                      {user?.avatar}
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-white text-xs font-medium overflow-hidden">
+                      {user?.avatar?.startsWith('http') ? (
+                        <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+                      ) : (
+                        user?.avatar
+                      )}
                     </div>
                   </motion.button>
 
@@ -536,8 +734,12 @@ export default function Home() {
                   <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Account</h3>
                   <div className="space-y-1">
                     <div className="flex items-center gap-3 px-3 py-3 rounded-lg bg-secondary/50">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-white text-sm font-medium">
-                        {user?.avatar}
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-white text-sm font-medium overflow-hidden">
+                        {user?.avatar?.startsWith('http') ? (
+                          <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+                        ) : (
+                          user?.avatar
+                        )}
                       </div>
                       <div>
                         <p className="text-sm font-medium text-foreground">{user?.name}</p>
@@ -669,763 +871,788 @@ export default function Home() {
       </AnimatePresence>
 
       <main className="max-w-6xl mx-auto px-6 py-10">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="mb-8"
-        >
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground mb-1">
-            {isSignedIn ? `Welcome back, ${user?.name.split(" ")[0]}` : "Applications"}
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            {isSignedIn ? "Track your job search progress" : "Sign in to save your applications"}
-          </p>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8"
-        >
-          <motion.div
-            className="bg-card border border-border rounded-lg px-4 py-3 group cursor-default"
-            whileHover={{ scale: 1.02 }}
-            transition={{ type: "spring", stiffness: 400, damping: 25 }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Total</span>
-              <Briefcase className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
-            </div>
-            <div className="text-2xl font-semibold text-foreground font-display">
-              <AnimatedCounter value={totalApps} />
-            </div>
-          </motion.div>
-
-          <motion.div
-            className="bg-card border border-border rounded-lg px-4 py-3 group cursor-default"
-            whileHover={{ scale: 1.02 }}
-            transition={{ type: "spring", stiffness: 400, damping: 25 }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">This Week</span>
-              <CalendarIcon className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
-            </div>
-            <div className="text-2xl font-semibold text-foreground font-display">
-              <AnimatedCounter value={3} />
-            </div>
-          </motion.div>
-
-          <motion.div
-            className="bg-card border border-border rounded-lg px-4 py-3 group cursor-default"
-            whileHover={{ scale: 1.02 }}
-            transition={{ type: "spring", stiffness: 400, damping: 25 }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Interview Rate</span>
-              <TrendingUp className="w-3.5 h-3.5 text-muted-foreground group-hover:text-emerald-500 transition-colors" />
-            </div>
-            <div className="text-2xl font-semibold text-foreground font-display">
-              <AnimatedCounter value={interviewRate} />%
-            </div>
-          </motion.div>
-
-          <motion.div
-            className="bg-card border border-border rounded-lg px-4 py-3 group cursor-default"
-            whileHover={{ scale: 1.02 }}
-            transition={{ type: "spring", stiffness: 400, damping: 25 }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Active</span>
-              <Clock className="w-3.5 h-3.5 text-muted-foreground group-hover:text-sky-500 transition-colors" />
-            </div>
-            <div className="text-2xl font-semibold text-foreground font-display">
-              <AnimatedCounter value={applications.filter(a => a.status === "applied" || a.status === "interviewing").length} />
-            </div>
-          </motion.div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="flex gap-6 mb-6 border-b border-border"
-        >
-          {["recommended", "custom"].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab as "recommended" | "custom")}
-              className={`pb-3 text-sm font-medium transition-colors relative ${activeTab === tab
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-                }`}
-              data-testid={`tab-${tab}`}
-            >
-              <span className="flex items-center gap-1.5">
-                {tab === "recommended" && <Sparkles className="w-3.5 h-3.5" />}
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </span>
-              {activeTab === tab && (
-                <motion.div
-                  layoutId="activeTab"
-                  className="absolute bottom-0 left-0 right-0 h-px bg-foreground"
-                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                />
-              )}
-            </button>
-          ))}
-        </motion.div>
-
-        <AnimatePresence>
-          {showForm && (
+        {(authLoading || appsLoading) && isSignedIn ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="text-muted-foreground">Loading...</div>
+          </div>
+        ) : (
+          <>
             <motion.div
-              initial={{ opacity: 0, y: -10, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={isCanceling
-                ? { opacity: 0, height: 0, transition: { height: { duration: 0.15, ease: [0.4, 0, 1, 1] }, opacity: { duration: 0.1, ease: [0.4, 0, 1, 1] } } }
-                : { opacity: 0, y: 10, scale: 0.95, transition: { duration: 0.2, ease: [0.4, 0, 0.2, 1] } }
-              }
-              className="mb-6"
-              style={isCanceling ? { overflow: "hidden" } : { overflow: "visible" }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="mb-8"
+            >
+              <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground mb-1">
+                {isSignedIn ? `Welcome back, ${user?.name.split(" ")[0]}` : "Applications"}
+              </h1>
+              <p className="text-muted-foreground text-sm">
+                {isSignedIn ? "Track your job search progress" : "Sign in to save your applications"}
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8"
             >
               <motion.div
-                className="bg-card border border-border rounded-lg p-5 relative overflow-visible"
-                initial={{ y: -10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={isCanceling
-                  ? { opacity: 0, transition: { duration: 0.1 } }
-                  : { y: 10, opacity: 0, transition: { delay: 0.05, duration: 0.2, ease: [0.4, 0, 0.2, 1] } }
-                }
+                className="bg-card border border-border rounded-lg px-4 py-3 group cursor-default"
+                whileHover={{ scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
               >
-                {/* Success Animation Overlay */}
-                <AnimatePresence>
-                  {showSuccessAnimation && (
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">Total</span>
+                  <Briefcase className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                </div>
+                <div className="text-2xl font-semibold text-foreground font-display">
+                  <AnimatedCounter value={totalApps} />
+                </div>
+              </motion.div>
+
+              <motion.div
+                className="bg-card border border-border rounded-lg px-4 py-3 group cursor-default"
+                whileHover={{ scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">This Week</span>
+                  <CalendarIcon className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                </div>
+                <div className="text-2xl font-semibold text-foreground font-display">
+                  <AnimatedCounter value={3} />
+                </div>
+              </motion.div>
+
+              <motion.div
+                className="bg-card border border-border rounded-lg px-4 py-3 group cursor-default"
+                whileHover={{ scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">Interview Rate</span>
+                  <TrendingUp className="w-3.5 h-3.5 text-muted-foreground group-hover:text-emerald-500 transition-colors" />
+                </div>
+                <div className="text-2xl font-semibold text-foreground font-display">
+                  <AnimatedCounter value={interviewRate} />%
+                </div>
+              </motion.div>
+
+              <motion.div
+                className="bg-card border border-border rounded-lg px-4 py-3 group cursor-default"
+                whileHover={{ scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">Active</span>
+                  <Clock className="w-3.5 h-3.5 text-muted-foreground group-hover:text-sky-500 transition-colors" />
+                </div>
+                <div className="text-2xl font-semibold text-foreground font-display">
+                  <AnimatedCounter value={applications.filter(a => a.status === "applied" || a.status === "interviewing").length} />
+                </div>
+              </motion.div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="flex gap-6 mb-6 border-b border-border"
+            >
+              {["recommended", "custom"].map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab as "recommended" | "custom")}
+                  className={`pb-3 text-sm font-medium transition-colors relative ${activeTab === tab
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  data-testid={`tab-${tab}`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    {tab === "recommended" && <Sparkles className="w-3.5 h-3.5" />}
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </span>
+                  {activeTab === tab && (
                     <motion.div
+                      layoutId="activeTab"
+                      className="absolute bottom-0 left-0 right-0 h-px bg-foreground"
+                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                    />
+                  )}
+                </button>
+              ))}
+            </motion.div>
+
+            <AnimatePresence>
+              {showForm && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={isCanceling
+                    ? { opacity: 0, height: 0, transition: { height: { duration: 0.15, ease: [0.4, 0, 1, 1] }, opacity: { duration: 0.1, ease: [0.4, 0, 1, 1] } } }
+                    : { opacity: 0, y: 10, scale: 0.95, transition: { duration: 0.2, ease: [0.4, 0, 0.2, 1] } }
+                  }
+                  className="mb-6"
+                  style={isCanceling ? { overflow: "hidden" } : { overflow: "visible" }}
+                >
+                  <motion.div
+                    className="bg-card border border-border rounded-lg p-5 relative overflow-visible"
+                    initial={{ y: -10, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={isCanceling
+                      ? { opacity: 0, transition: { duration: 0.1 } }
+                      : { y: 10, opacity: 0, transition: { delay: 0.05, duration: 0.2, ease: [0.4, 0, 0.2, 1] } }
+                    }
+                  >
+                    {/* Success Animation Overlay */}
+                    <AnimatePresence>
+                      {showSuccessAnimation && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="absolute inset-0 bg-card/95 backdrop-blur-sm z-50 flex flex-col items-center justify-center gap-4"
+                        >
+                          <motion.div
+                            initial={{ scale: 0, rotate: -180 }}
+                            animate={{ scale: 1, rotate: 0 }}
+                            transition={{
+                              type: "spring",
+                              stiffness: 300,
+                              damping: 20,
+                              delay: 0.1
+                            }}
+                            className="relative"
+                          >
+                            {/* Ripple effect */}
+                            <motion.div
+                              initial={{ scale: 0.8, opacity: 0.8 }}
+                              animate={{ scale: 2.5, opacity: 0 }}
+                              transition={{ duration: 0.6, ease: "easeOut" }}
+                              className="absolute inset-0 rounded-full bg-emerald-500/30"
+                            />
+                            <motion.div
+                              initial={{ scale: 0.8, opacity: 0.6 }}
+                              animate={{ scale: 2, opacity: 0 }}
+                              transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 }}
+                              className="absolute inset-0 rounded-full bg-emerald-500/20"
+                            />
+                            {/* Checkmark circle */}
+                            <motion.div
+                              className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30"
+                              initial={{ scale: 0 }}
+                              animate={{ scale: [0, 1.2, 1] }}
+                              transition={{ duration: 0.4, times: [0, 0.6, 1] }}
+                            >
+                              <motion.svg
+                                viewBox="0 0 24 24"
+                                className="w-8 h-8 text-white"
+                                initial={{ pathLength: 0, opacity: 0 }}
+                                animate={{ pathLength: 1, opacity: 1 }}
+                                transition={{ duration: 0.3, delay: 0.2 }}
+                              >
+                                <motion.path
+                                  d="M5 13l4 4L19 7"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={3}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  initial={{ pathLength: 0 }}
+                                  animate={{ pathLength: 1 }}
+                                  transition={{ duration: 0.3, delay: 0.25 }}
+                                />
+                              </motion.svg>
+                            </motion.div>
+                          </motion.div>
+                          <motion.p
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.35 }}
+                            className="text-sm font-medium text-emerald-500"
+                          >
+                            Application Added!
+                          </motion.p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <div className="flex items-center gap-2 mb-5">
+                      <motion.div
+                        initial={{ rotate: 0 }}
+                        animate={{ rotate: 180 }}
+                        transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+                      >
+                        <Plus className="w-4 h-4 text-muted-foreground" />
+                      </motion.div>
+                      <span className="text-sm font-medium text-foreground">New Application</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                      <motion.div
+                        className="space-y-1.5"
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.1 }}
+                      >
+                        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                          <Building2 className="w-3 h-3" />
+                          Company
+                        </label>
+                        <Input
+                          value={formData.company}
+                          onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                          placeholder="Stripe"
+                          className="bg-secondary/50 border-border text-sm h-9 placeholder:text-muted-foreground focus:border-ring focus:ring-0 transition-all"
+                          data-testid="input-company"
+                        />
+                      </motion.div>
+
+                      <motion.div
+                        className="space-y-1.5"
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.15 }}
+                      >
+                        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                          <Briefcase className="w-3 h-3" />
+                          Position
+                        </label>
+                        <Input
+                          value={formData.position}
+                          onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                          placeholder="Frontend Engineer"
+                          className="bg-secondary/50 border-border text-sm h-9 placeholder:text-muted-foreground focus:border-ring focus:ring-0 transition-all"
+                          data-testid="input-position"
+                        />
+                      </motion.div>
+
+                      <motion.div
+                        className="space-y-1.5"
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.2 }}
+                      >
+                        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                          <Link2 className="w-3 h-3" />
+                          Link
+                        </label>
+                        <Input
+                          value={formData.link}
+                          onChange={(e) => setFormData({ ...formData, link: e.target.value })}
+                          placeholder="https://..."
+                          className="bg-secondary/50 border-border text-sm h-9 placeholder:text-muted-foreground focus:border-ring focus:ring-0 transition-all"
+                          data-testid="input-link"
+                        />
+                      </motion.div>
+
+                      <motion.div
+                        className="space-y-1.5 relative"
+                        style={{ minHeight: 'auto', height: 'auto' }}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.25 }}
+                      >
+                        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                          <Clock className="w-3 h-3" />
+                          Status
+                        </label>
+                        <div className="relative" style={{ minHeight: '36px' }} ref={formStatusDropdownRef}>
+                          <button
+                            onClick={() => setStatusDropdownOpen(!statusDropdownOpen)}
+                            className="w-full flex items-center justify-between px-3 h-9 rounded-md bg-secondary/50 border border-border hover:border-ring transition-colors text-sm"
+                            data-testid="select-status"
+                          >
+                            <span className={statusConfig[formData.status].color}>
+                              {statusConfig[formData.status].label}
+                            </span>
+                            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                          </button>
+                          {statusDropdownOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.8 }}
+                              transition={{ duration: 0.15, ease: "easeOut" }}
+                              className="absolute bottom-full left-0 right-0 mb-1 bg-card border border-border rounded-md shadow-xl z-[200] py-1"
+                            >
+                              {(Object.keys(statusConfig) as Status[]).map((status, index) => (
+                                <motion.button
+                                  key={status}
+                                  initial={{ opacity: 0, x: -10 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  transition={{ delay: index * 0.03 }}
+                                  onClick={() => {
+                                    setFormData({ ...formData, status });
+                                    setStatusDropdownOpen(false);
+                                  }}
+                                  className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${statusConfig[status].color}`}
+                                  data-testid={`option-status-${status}`}
+                                >
+                                  {statusConfig[status].label}
+                                </motion.button>
+                              ))}
+                            </motion.div>
+                          )}
+                        </div>
+                      </motion.div>
+
+                      <motion.div
+                        className="space-y-1.5"
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.3 }}
+                      >
+                        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                          <CalendarIcon className="w-3 h-3" />
+                          Date Applied
+                        </label>
+                        <div className="relative">
+                          <Input
+                            type="date"
+                            value={dateInputValue}
+                            onChange={(e) => {
+                              setDateInputValue(e.target.value);
+                              setFormData({
+                                ...formData,
+                                dateApplied: new Date(e.target.value).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" })
+                              });
+                            }}
+                            className="bg-secondary/50 border-border text-sm h-9 focus:border-ring focus:ring-0 transition-all text-foreground pr-8"
+                            data-testid="input-date"
+                          />
+                        </div>
+                      </motion.div>
+                    </div>
+
+                    <motion.div
+                      className="flex justify-end gap-2 mt-5 pt-4 border-t border-border"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute inset-0 bg-card/95 backdrop-blur-sm z-50 flex flex-col items-center justify-center gap-4"
+                      transition={{ delay: 0.35 }}
                     >
-                      <motion.div
-                        initial={{ scale: 0, rotate: -180 }}
-                        animate={{ scale: 1, rotate: 0 }}
-                        transition={{
-                          type: "spring",
-                          stiffness: 300,
-                          damping: 20,
-                          delay: 0.1
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setStatusDropdownOpen(false);
+                          setIsCanceling(true);
+                          setShowForm(false);
+                          setTimeout(() => {
+                            setIsCanceling(false);
+                          }, 200);
                         }}
-                        className="relative"
+                        className="text-muted-foreground hover:text-foreground hover:bg-secondary/50 h-8"
+                        data-testid="button-cancel"
                       >
-                        {/* Ripple effect */}
-                        <motion.div
-                          initial={{ scale: 0.8, opacity: 0.8 }}
-                          animate={{ scale: 2.5, opacity: 0 }}
-                          transition={{ duration: 0.6, ease: "easeOut" }}
-                          className="absolute inset-0 rounded-full bg-emerald-500/30"
-                        />
-                        <motion.div
-                          initial={{ scale: 0.8, opacity: 0.6 }}
-                          animate={{ scale: 2, opacity: 0 }}
-                          transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 }}
-                          className="absolute inset-0 rounded-full bg-emerald-500/20"
-                        />
-                        {/* Checkmark circle */}
-                        <motion.div
-                          className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30"
-                          initial={{ scale: 0 }}
-                          animate={{ scale: [0, 1.2, 1] }}
-                          transition={{ duration: 0.4, times: [0, 0.6, 1] }}
+                        Cancel
+                      </Button>
+                      <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                        <Button
+                          size="sm"
+                          onClick={handleAddApplication}
+                          className="bg-zinc-100 hover:bg-white text-zinc-900 h-8"
+                          data-testid="button-submit"
                         >
-                          <motion.svg
-                            viewBox="0 0 24 24"
-                            className="w-8 h-8 text-white"
-                            initial={{ pathLength: 0, opacity: 0 }}
-                            animate={{ pathLength: 1, opacity: 1 }}
-                            transition={{ duration: 0.3, delay: 0.2 }}
-                          >
-                            <motion.path
-                              d="M5 13l4 4L19 7"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth={3}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              initial={{ pathLength: 0 }}
-                              animate={{ pathLength: 1 }}
-                              transition={{ duration: 0.3, delay: 0.25 }}
-                            />
-                          </motion.svg>
-                        </motion.div>
+                          Add
+                        </Button>
                       </motion.div>
-                      <motion.p
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.35 }}
-                        className="text-sm font-medium text-emerald-500"
+                    </motion.div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25 }}
+              className="flex flex-wrap items-center gap-2 mb-4"
+            >
+              <div className="relative flex-1 min-w-[200px] max-w-xs">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search applications..."
+                  className="pl-9 pr-8 bg-transparent border-border text-sm h-8 placeholder:text-muted-foreground focus:border-ring focus:ring-0"
+                  data-testid="input-search"
+                />
+                <AnimatePresence>
+                  {searchQuery && (
+                    <motion.button
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground"
+                      data-testid="button-clear-search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </motion.button>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <div className="relative" ref={filterRef}>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    setFilterDropdownOpen(!filterDropdownOpen);
+                    setSortDropdownOpen(false);
+                  }}
+                  className={`flex items-center gap-2 px-3 h-8 rounded-md border text-sm transition-colors ${statusFilter !== "all"
+                    ? "bg-secondary border-border text-foreground"
+                    : "bg-transparent border-border text-muted-foreground hover:text-foreground hover:border-ring"
+                    }`}
+                  data-testid="button-filter-status"
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  {statusFilter === "all" ? "All Status" : statusConfig[statusFilter].label}
+                  <ChevronDown className="w-3 h-3" />
+                </motion.button>
+                <AnimatePresence>
+                  {filterDropdownOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -5, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -5, scale: 0.95 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      className="absolute top-full left-0 mt-1 bg-card border border-border rounded-md shadow-xl z-50 overflow-hidden py-1 min-w-[140px]"
+                    >
+                      <motion.button
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        onClick={() => {
+                          setStatusFilter("all");
+                          setFilterDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${statusFilter === "all" ? "text-foreground" : "text-muted-foreground"
+                          }`}
+                        data-testid="filter-all"
                       >
-                        Application Added!
-                      </motion.p>
+                        All Status
+                      </motion.button>
+                      {(Object.keys(statusConfig) as Status[]).map((status, index) => (
+                        <motion.button
+                          key={status}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: (index + 1) * 0.03 }}
+                          onClick={() => {
+                            setStatusFilter(status);
+                            setFilterDropdownOpen(false);
+                          }}
+                          className={`w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${statusFilter === status ? statusConfig[status].color : "text-muted-foreground"
+                            }`}
+                          data-testid={`filter-${status}`}
+                        >
+                          {statusConfig[status].label}
+                        </motion.button>
+                      ))}
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </div>
 
-                <div className="flex items-center gap-2 mb-5">
-                  <motion.div
-                    initial={{ rotate: 0 }}
-                    animate={{ rotate: 180 }}
-                    transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-                  >
-                    <Plus className="w-4 h-4 text-muted-foreground" />
-                  </motion.div>
-                  <span className="text-sm font-medium text-foreground">New Application</span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                  <motion.div
-                    className="space-y-1.5"
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.1 }}
-                  >
-                    <label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <Building2 className="w-3 h-3" />
-                      Company
-                    </label>
-                    <Input
-                      value={formData.company}
-                      onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                      placeholder="Stripe"
-                      className="bg-secondary/50 border-border text-sm h-9 placeholder:text-muted-foreground focus:border-ring focus:ring-0 transition-all"
-                      data-testid="input-company"
-                    />
-                  </motion.div>
-
-                  <motion.div
-                    className="space-y-1.5"
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.15 }}
-                  >
-                    <label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <Briefcase className="w-3 h-3" />
-                      Position
-                    </label>
-                    <Input
-                      value={formData.position}
-                      onChange={(e) => setFormData({ ...formData, position: e.target.value })}
-                      placeholder="Frontend Engineer"
-                      className="bg-secondary/50 border-border text-sm h-9 placeholder:text-muted-foreground focus:border-ring focus:ring-0 transition-all"
-                      data-testid="input-position"
-                    />
-                  </motion.div>
-
-                  <motion.div
-                    className="space-y-1.5"
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.2 }}
-                  >
-                    <label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <Link2 className="w-3 h-3" />
-                      Link
-                    </label>
-                    <Input
-                      value={formData.link}
-                      onChange={(e) => setFormData({ ...formData, link: e.target.value })}
-                      placeholder="https://..."
-                      className="bg-secondary/50 border-border text-sm h-9 placeholder:text-muted-foreground focus:border-ring focus:ring-0 transition-all"
-                      data-testid="input-link"
-                    />
-                  </motion.div>
-
-                  <motion.div
-                    className="space-y-1.5 relative"
-                    style={{ minHeight: 'auto', height: 'auto' }}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.25 }}
-                  >
-                    <label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <Clock className="w-3 h-3" />
-                      Status
-                    </label>
-                    <div className="relative" style={{ minHeight: '36px' }}>
-                      <button
-                        onClick={() => setStatusDropdownOpen(!statusDropdownOpen)}
-                        className="w-full flex items-center justify-between px-3 h-9 rounded-md bg-secondary/50 border border-border hover:border-ring transition-colors text-sm"
-                        data-testid="select-status"
-                      >
-                        <span className={statusConfig[formData.status].color}>
-                          {statusConfig[formData.status].label}
-                        </span>
-                        <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
-                      {statusDropdownOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 5, scale: 0.95 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.8 }}
-                          transition={{ duration: 0.15, ease: "easeOut" }}
-                          className="absolute bottom-full left-0 right-0 mb-1 bg-card border border-border rounded-md shadow-xl z-[200] py-1"
-                        >
-                          {(Object.keys(statusConfig) as Status[]).map((status, index) => (
-                            <motion.button
-                              key={status}
-                              initial={{ opacity: 0, x: -10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              transition={{ delay: index * 0.03 }}
-                              onClick={() => {
-                                setFormData({ ...formData, status });
-                                setStatusDropdownOpen(false);
-                              }}
-                              className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${statusConfig[status].color}`}
-                              data-testid={`option-status-${status}`}
-                            >
-                              {statusConfig[status].label}
-                            </motion.button>
-                          ))}
-                        </motion.div>
-                      )}
-                    </div>
-                  </motion.div>
-
-                  <motion.div
-                    className="space-y-1.5"
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.3 }}
-                  >
-                    <label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <span className="text-foreground inline-flex">
-                        <CalendarIcon className="w-3 h-3" stroke="currentColor" />
-                      </span>
-                      Date Applied
-                    </label>
-                    <Input
-                      type="date"
-                      defaultValue={new Date().toISOString().split('T')[0]}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        dateApplied: new Date(e.target.value).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" })
-                      })}
-                      className="bg-secondary/50 border-border text-sm h-9 focus:border-ring focus:ring-0 transition-all text-foreground [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-calendar-picker-indicator]:invert dark:[&::-webkit-calendar-picker-indicator]:invert-0"
-                      data-testid="input-date"
-                    />
-                  </motion.div>
-                </div>
-
-                <motion.div
-                  className="flex justify-end gap-2 mt-5 pt-4 border-t border-border"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.35 }}
-                >
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setStatusDropdownOpen(false);
-                      setIsCanceling(true);
-                      setShowForm(false);
-                      setTimeout(() => {
-                        setIsCanceling(false);
-                      }, 200);
-                    }}
-                    className="text-muted-foreground hover:text-foreground hover:bg-secondary/50 h-8"
-                    data-testid="button-cancel"
-                  >
-                    Cancel
-                  </Button>
-                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                    <Button
-                      size="sm"
-                      onClick={handleAddApplication}
-                      className="bg-zinc-100 hover:bg-white text-zinc-900 h-8"
-                      data-testid="button-submit"
-                    >
-                      Add
-                    </Button>
-                  </motion.div>
-                </motion.div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-          className="flex flex-wrap items-center gap-2 mb-4"
-        >
-          <div className="relative flex-1 min-w-[200px] max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search applications..."
-              className="pl-9 pr-8 bg-transparent border-border text-sm h-8 placeholder:text-muted-foreground focus:border-ring focus:ring-0"
-              data-testid="input-search"
-            />
-            <AnimatePresence>
-              {searchQuery && (
+              <div className="relative" ref={sortRef}>
                 <motion.button
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground"
-                  data-testid="button-clear-search"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    setSortDropdownOpen(!sortDropdownOpen);
+                    setFilterDropdownOpen(false);
+                  }}
+                  className="flex items-center gap-2 px-3 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-ring text-sm transition-colors"
+                  data-testid="button-sort"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                  {sortLabels[sortBy]}
+                  <ChevronDown className="w-3 h-3" />
                 </motion.button>
-              )}
-            </AnimatePresence>
-          </div>
+                <AnimatePresence>
+                  {sortDropdownOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -5, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -5, scale: 0.95 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      className="absolute top-full left-0 mt-1 bg-card border border-border rounded-md shadow-xl z-50 overflow-hidden py-1 min-w-[160px]"
+                    >
+                      {(Object.keys(sortLabels) as SortOption[]).map((option, index) => (
+                        <motion.button
+                          key={option}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.03 }}
+                          onClick={() => {
+                            setSortBy(option);
+                            setSortDropdownOpen(false);
+                          }}
+                          className={`w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${sortBy === option ? "text-foreground" : "text-muted-foreground"
+                            }`}
+                          data-testid={`sort-${option}`}
+                        >
+                          {sortLabels[option]}
+                        </motion.button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
 
-          <div className="relative" ref={filterRef}>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => {
-                setFilterDropdownOpen(!filterDropdownOpen);
-                setSortDropdownOpen(false);
-              }}
-              className={`flex items-center gap-2 px-3 h-8 rounded-md border text-sm transition-colors ${statusFilter !== "all"
-                ? "bg-secondary border-border text-foreground"
-                : "bg-transparent border-border text-muted-foreground hover:text-foreground hover:border-ring"
-                }`}
-              data-testid="button-filter-status"
-            >
-              <Filter className="w-3.5 h-3.5" />
-              {statusFilter === "all" ? "All Status" : statusConfig[statusFilter].label}
-              <ChevronDown className="w-3 h-3" />
-            </motion.button>
-            <AnimatePresence>
-              {filterDropdownOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -5, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -5, scale: 0.95 }}
-                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                  className="absolute top-full left-0 mt-1 bg-card border border-border rounded-md shadow-xl z-50 overflow-hidden py-1 min-w-[140px]"
-                >
+              <AnimatePresence>
+                {(statusFilter !== "all" || searchQuery) && (
                   <motion.button
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
                     onClick={() => {
                       setStatusFilter("all");
-                      setFilterDropdownOpen(false);
+                      setSearchQuery("");
                     }}
-                    className={`w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${statusFilter === "all" ? "text-foreground" : "text-muted-foreground"
-                      }`}
-                    data-testid="filter-all"
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    data-testid="button-clear-filter"
                   >
-                    All Status
+                    Clear all
                   </motion.button>
-                  {(Object.keys(statusConfig) as Status[]).map((status, index) => (
-                    <motion.button
-                      key={status}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: (index + 1) * 0.03 }}
-                      onClick={() => {
-                        setStatusFilter(status);
-                        setFilterDropdownOpen(false);
-                      }}
-                      className={`w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${statusFilter === status ? statusConfig[status].color : "text-muted-foreground"
-                        }`}
-                      data-testid={`filter-${status}`}
-                    >
-                      {statusConfig[status].label}
-                    </motion.button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                )}
+              </AnimatePresence>
 
-          <div className="relative" ref={sortRef}>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => {
-                setSortDropdownOpen(!sortDropdownOpen);
-                setFilterDropdownOpen(false);
-              }}
-              className="flex items-center gap-2 px-3 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-ring text-sm transition-colors"
-              data-testid="button-sort"
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              {sortLabels[sortBy]}
-              <ChevronDown className="w-3 h-3" />
-            </motion.button>
-            <AnimatePresence>
-              {sortDropdownOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -5, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -5, scale: 0.95 }}
-                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                  className="absolute top-full left-0 mt-1 bg-card border border-border rounded-md shadow-xl z-50 overflow-hidden py-1 min-w-[160px]"
-                >
-                  {(Object.keys(sortLabels) as SortOption[]).map((option, index) => (
-                    <motion.button
-                      key={option}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.03 }}
-                      onClick={() => {
-                        setSortBy(option);
-                        setSortDropdownOpen(false);
-                      }}
-                      className={`w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${sortBy === option ? "text-foreground" : "text-muted-foreground"
-                        }`}
-                      data-testid={`sort-${option}`}
-                    >
-                      {sortLabels[option]}
-                    </motion.button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <AnimatePresence>
-            {(statusFilter !== "all" || searchQuery) && (
-              <motion.button
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                onClick={() => {
-                  setStatusFilter("all");
-                  setSearchQuery("");
-                }}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                data-testid="button-clear-filter"
-              >
-                Clear all
-              </motion.button>
-            )}
-          </AnimatePresence>
-
-          {/* Add Application Button - Purple */}
-          <AnimatePresence mode="wait">
-            {!showForm && (
-              <motion.div
-                key="add-button"
-                className="ml-auto"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20, transition: { duration: 0.2 } }}
-                transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <Button
-                  onClick={() => setShowForm(!showForm)}
-                  size="sm"
-                  className="bg-violet-500 hover:bg-violet-600 text-white border-0 gap-1.5 font-medium text-sm h-8"
-                  data-testid="button-add-new"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add Application
-                </Button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="border border-border rounded-lg"
-        >
-          <div className="grid grid-cols-12 gap-4 px-5 py-3 bg-secondary/30 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            <div className="col-span-3">Company</div>
-            <div className="col-span-4">Role</div>
-            <div className="col-span-2">Status</div>
-            <div className="col-span-2">Date Applied</div>
-            <div className="col-span-1"></div>
-          </div>
-
-          <div>
-            {filteredAndSortedApplications.map((app) => {
-              return (
-                <div
-                  key={app.id}
-                  className="grid grid-cols-12 gap-4 px-5 py-4 items-center hover:bg-secondary/30 transition-colors group border-b border-border/50 last:border-b-0"
-                  data-testid={`row-application-${app.id}`}
-                >
-                  <div className="col-span-3 flex items-center gap-3">
-                    <motion.div
-                      className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center text-muted-foreground text-sm font-medium"
-                      whileHover={{ scale: 1.1, rotate: 5 }}
-                      transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                    >
-                      {app.company.charAt(0)}
-                    </motion.div>
-                    <span className="text-sm font-medium text-foreground" data-testid={`text-company-${app.id}`}>
-                      {app.company}
-                    </span>
-                  </div>
-
-                  <div className="col-span-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-foreground/80" data-testid={`text-position-${app.id}`}>
-                        {app.position}
-                      </span>
-                      {app.link && (
-                        <motion.a
-                          href={app.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100"
-                          whileHover={{ scale: 1.1 }}
-                          data-testid={`link-job-${app.id}`}
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </motion.a>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="col-span-2">
-                    <div
-                      className="relative"
-                      ref={(el) => {
-                        if (el) {
-                          statusDropdownRefs.current.set(app.id, el);
-                        } else {
-                          statusDropdownRefs.current.delete(app.id);
-                        }
-                      }}
-                    >
-                      <motion.button
-                        onClick={() => setOpenStatusDropdown(openStatusDropdown === app.id ? null : app.id)}
-                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium cursor-pointer ${statusConfig[app.status].bgColor} ${statusConfig[app.status].color}`}
-                        whileHover={{ scale: 1.05 }}
-                        data-testid={`badge-status-${app.id}`}
-                      >
-                        {statusConfig[app.status].label}
-                      </motion.button>
-                      <AnimatePresence>
-                        {openStatusDropdown === app.id && (
-                          <motion.div
-                            initial={{ opacity: 0, y: -5, scale: 0.95 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: -5, scale: 0.95 }}
-                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                            className="absolute top-full left-0 mt-1 bg-card border border-border rounded-md shadow-xl z-[100] overflow-hidden py-1 min-w-[120px]"
-                          >
-                            {(Object.keys(statusConfig) as Status[]).map((status, index) => (
-                              <motion.button
-                                key={status}
-                                initial={{ opacity: 0, x: -10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: index * 0.03 }}
-                                onClick={() => handleStatusChange(app.id, status)}
-                                className={`w-full flex items-center px-3 py-1.5 hover:bg-secondary/50 transition-colors text-xs ${app.status === status ? statusConfig[status].color : "text-muted-foreground"
-                                  }`}
-                              >
-                                {statusConfig[status].label}
-                              </motion.button>
-                            ))}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </div>
-
-                  <div className="col-span-2 text-sm text-muted-foreground" data-testid={`text-date-${app.id}`}>
-                    {app.dateApplied}
-                  </div>
-
-                  <div className="col-span-1 flex justify-end">
-                    <motion.button
-                      onClick={() => handleDelete(app.id)}
-                      className="p-1.5 rounded text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-all opacity-0 group-hover:opacity-100"
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                      data-testid={`button-delete-${app.id}`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </motion.button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {filteredAndSortedApplications.length === 0 && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="px-5 py-12 text-center"
-            >
-              <motion.div
-                className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center mx-auto mb-3"
-                animate={{ rotate: [0, 5, -5, 0] }}
-                transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
-              >
-                <Briefcase className="w-5 h-5 text-muted-foreground" />
-              </motion.div>
-              <p className="text-sm text-muted-foreground mb-3">
-                {searchQuery || statusFilter !== "all"
-                  ? "No applications match your filters"
-                  : "No applications yet"}
-              </p>
-              {!searchQuery && statusFilter === "all" && (
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                  <Button
-                    size="sm"
-                    onClick={() => setShowForm(true)}
-                    className="bg-zinc-100 hover:bg-white text-zinc-900 h-8"
-                    data-testid="button-add-first"
+              {/* Add Application Button - Purple */}
+              <AnimatePresence mode="wait">
+                {!showForm && (
+                  <motion.div
+                    key="add-button"
+                    className="ml-auto"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20, transition: { duration: 0.2 } }}
+                    transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
                   >
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    Add application
-                  </Button>
+                    <Button
+                      onClick={() => setShowForm(!showForm)}
+                      size="sm"
+                      className="bg-violet-500 hover:bg-violet-600 text-white border-0 gap-1.5 font-medium text-sm h-8"
+                      data-testid="button-add-new"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Application
+                    </Button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="border border-border rounded-lg"
+            >
+              <div className="grid grid-cols-12 gap-4 px-5 py-3 bg-secondary/30 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                <div className="col-span-3">Company</div>
+                <div className="col-span-4">Role</div>
+                <div className="col-span-2">Status</div>
+                <div className="col-span-2 pl-4">Date Applied</div>
+                <div className="col-span-1"></div>
+              </div>
+
+              <div>
+                {filteredAndSortedApplications.map((app) => {
+                  return (
+                    <div
+                      key={app.id}
+                      className="grid grid-cols-12 gap-4 px-5 py-4 items-center hover:bg-secondary/30 transition-colors group border-b border-border/50 last:border-b-0"
+                      data-testid={`row-application-${app.id}`}
+                    >
+                      <div className="col-span-3 flex items-center gap-3">
+                        <motion.div
+                          className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center text-muted-foreground text-sm font-medium"
+                          whileHover={{ scale: 1.1, rotate: 5 }}
+                          transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                        >
+                          {app.company.charAt(0)}
+                        </motion.div>
+                        <span className="text-sm font-medium text-foreground" data-testid={`text-company-${app.id}`}>
+                          {app.company}
+                        </span>
+                      </div>
+
+                      <div className="col-span-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-foreground/80" data-testid={`text-position-${app.id}`}>
+                            {app.position}
+                          </span>
+                          {app.link && (
+                            <motion.a
+                              href={app.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100"
+                              whileHover={{ scale: 1.1 }}
+                              data-testid={`link-job-${app.id}`}
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </motion.a>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="col-span-2">
+                        <div
+                          className="relative"
+                          ref={(el) => {
+                            if (el) {
+                              statusDropdownRefs.current.set(app.id, el);
+                            } else {
+                              statusDropdownRefs.current.delete(app.id);
+                            }
+                          }}
+                        >
+                          <motion.button
+                            onClick={() => setOpenStatusDropdown(openStatusDropdown === app.id ? null : app.id)}
+                            className={`group/status inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer backdrop-blur-sm transition-all duration-200 shadow-sm hover:shadow-md ${app.status === "applied"
+                              ? darkMode
+                                ? "bg-zinc-400/20 text-zinc-400 shadow-zinc-400/20"
+                                : "bg-zinc-400/15 text-zinc-400 shadow-zinc-400/20"
+                              : app.status === "interviewing"
+                                ? darkMode
+                                  ? "bg-sky-400/20 text-sky-400 shadow-sky-400/20"
+                                  : "bg-sky-400/15 text-sky-400 shadow-sky-400/20"
+                                : app.status === "offered"
+                                  ? darkMode
+                                    ? "bg-emerald-500/20 text-emerald-500 shadow-emerald-500/20"
+                                    : "bg-emerald-500/15 text-emerald-500 shadow-emerald-500/20"
+                                  : darkMode
+                                    ? "bg-red-500/20 text-red-500 shadow-red-500/20"
+                                    : "bg-red-500/15 text-red-500 shadow-red-500/20"
+                              }`}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.98 }}
+                            data-testid={`badge-status-${app.id}`}
+                          >
+                            {(() => {
+                              const StatusIcon = statusConfig[app.status].icon;
+                              return <StatusIcon className="w-3 h-3 opacity-90 group-hover/status:opacity-100 transition-opacity" />;
+                            })()}
+                            {statusConfig[app.status].label}
+                          </motion.button>
+                          <AnimatePresence>
+                            {openStatusDropdown === app.id && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -5, scale: 0.95 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -5, scale: 0.95 }}
+                                transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                className="absolute top-full left-0 mt-1 bg-card border border-border rounded-md shadow-xl z-[100] overflow-hidden py-1 min-w-[120px]"
+                              >
+                                {(Object.keys(statusConfig) as Status[]).map((status, index) => (
+                                  <motion.button
+                                    key={status}
+                                    initial={{ opacity: 0, x: -10 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: index * 0.03 }}
+                                    onClick={() => handleStatusChange(app.id, status)}
+                                    className={`w-full flex items-center px-3 py-1.5 hover:bg-secondary/50 transition-colors text-xs ${app.status === status ? statusConfig[status].color : "text-muted-foreground"
+                                      }`}
+                                  >
+                                    {statusConfig[status].label}
+                                  </motion.button>
+                                ))}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+
+                      <div className="col-span-2 text-sm text-muted-foreground pl-4" data-testid={`text-date-${app.id}`}>
+                        {app.dateApplied}
+                      </div>
+
+                      <div className="col-span-1 flex justify-end">
+                        <motion.button
+                          onClick={() => handleDelete(app.id)}
+                          className="p-1.5 rounded text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-all opacity-0 group-hover:opacity-100"
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          data-testid={`button-delete-${app.id}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </motion.button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {filteredAndSortedApplications.length === 0 && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="px-5 py-12 text-center"
+                >
+                  <motion.div
+                    className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center mx-auto mb-3"
+                    animate={{ rotate: [0, 5, -5, 0] }}
+                    transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+                  >
+                    <Briefcase className="w-5 h-5 text-muted-foreground" />
+                  </motion.div>
+                  <p className="text-sm text-muted-foreground">
+                    {searchQuery || statusFilter !== "all"
+                      ? "No applications match your filters"
+                      : "No applications yet"}
+                  </p>
                 </motion.div>
               )}
             </motion.div>
-          )}
-        </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="mt-6 flex items-center justify-between"
-        >
-          <div className="flex items-center gap-4">
-            {(Object.keys(statusConfig) as Status[]).map((status) => {
-              const count = applications.filter(app => app.status === status).length;
-              return (
-                <motion.button
-                  key={status}
-                  onClick={() => setStatusFilter(statusFilter === status ? "all" : status)}
-                  className={`flex items-center gap-2 text-xs transition-colors ${statusFilter === status ? statusConfig[status].color : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  data-testid={`quick-filter-${status}`}
-                >
-                  <span className={`w-2 h-2 rounded-full ${statusConfig[status].bgColor}`} />
-                  {statusConfig[status].label}
-                  <span className="text-muted-foreground">({count})</span>
-                </motion.button>
-              );
-            })}
-          </div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+              className="mt-6 flex items-center justify-between"
+            >
+              <div className="flex items-center gap-4">
+                {(Object.keys(statusConfig) as Status[]).map((status) => {
+                  const count = applications.filter(app => app.status === status).length;
+                  const isSelected = statusFilter === status;
+                  const dotColors: Record<Status, string> = {
+                    applied: "bg-zinc-400",
+                    interviewing: "bg-sky-400",
+                    offered: "bg-emerald-500",
+                    rejected: "bg-red-500",
+                  };
+                  return (
+                    <motion.button
+                      key={status}
+                      onClick={() => setStatusFilter(statusFilter === status ? "all" : status)}
+                      className={`flex items-center gap-2 text-xs transition-colors ${isSelected ? statusConfig[status].color : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      data-testid={`quick-filter-${status}`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${isSelected ? dotColors[status] : statusConfig[status].bgColor}`} />
+                      {statusConfig[status].label}
+                      <span className="text-muted-foreground">({count})</span>
+                    </motion.button>
+                  );
+                })}
+              </div>
 
-          <p className="text-xs text-muted-foreground">
-            {filteredAndSortedApplications.length} of {applications.length} applications
-          </p>
-        </motion.div>
+              <p className="text-xs text-muted-foreground">
+                {filteredAndSortedApplications.length} of {applications.length} applications
+              </p>
+            </motion.div>
+          </>
+        )}
       </main>
     </div >
   );
