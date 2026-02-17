@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/use-auth";
 import { useApplications } from "@/hooks/use-applications";
 import { supabase } from "@/lib/supabase";
+import { getRecommended, INTERNSHIP_CATEGORIES, type RecommendedInternship, type InternshipCategory } from "@/utils/getRecommended";
 import {
   Plus,
   Building2,
@@ -29,7 +30,9 @@ import {
   Sun,
   Shield,
   Download,
-  AlertTriangle
+  AlertTriangle,
+  MapPin,
+  Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -222,6 +225,75 @@ export default function Home() {
   const [openStatusDropdown, setOpenStatusDropdown] = useState<string | null>(null);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
+
+  // Recommended internships state
+  const [recommendedInternships, setRecommendedInternships] = useState<RecommendedInternship[]>([]);
+  const [recommendedLoading, setRecommendedLoading] = useState(false);
+  const [recommendedError, setRecommendedError] = useState<string | null>(null);
+  const [recommendedSearch, setRecommendedSearch] = useState("");
+  const [recommendedCategory, setRecommendedCategory] = useState<InternshipCategory | "all">("all");
+  const [recommendedDisplayCount, setRecommendedDisplayCount] = useState(100);
+  const recommendedFetched = useRef(false);
+  const recommendedScrollRef = useRef<HTMLDivElement>(null);
+
+  // Fetch recommended internships when the tab is first activated
+  useEffect(() => {
+    if (activeTab === "recommended" && !recommendedFetched.current) {
+      recommendedFetched.current = true;
+      setRecommendedLoading(true);
+      setRecommendedError(null);
+      getRecommended()
+        .then((data) => {
+          setRecommendedInternships(data || []);
+        })
+        .catch(() => {
+          setRecommendedError("Failed to load recommended internships. Please try again.");
+        })
+        .finally(() => {
+          setRecommendedLoading(false);
+        });
+    }
+    // Reset display count & scroll position when switching back to recommended
+    if (activeTab === "recommended") {
+      setRecommendedDisplayCount(100);
+      if (recommendedScrollRef.current) {
+        recommendedScrollRef.current.scrollTop = 0;
+      }
+    }
+  }, [activeTab]);
+
+  // Reset display count when search or category changes
+  useEffect(() => {
+    setRecommendedDisplayCount(100);
+    if (recommendedScrollRef.current) {
+      recommendedScrollRef.current.scrollTop = 0;
+    }
+  }, [recommendedSearch, recommendedCategory]);
+
+  // Infinite scroll handler
+  const handleRecommendedScroll = useCallback(() => {
+    const el = recommendedScrollRef.current;
+    if (!el) return;
+    // Load more when within 200px of bottom
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
+      setRecommendedDisplayCount(prev => prev + 100);
+    }
+  }, []);
+
+  const filteredRecommended = recommendedInternships
+    .filter((item) => recommendedCategory === "all" || item.category === recommendedCategory)
+    .filter((item) =>
+      recommendedSearch === "" ||
+      item.company.toLowerCase().includes(recommendedSearch.toLowerCase()) ||
+      item.role.toLowerCase().includes(recommendedSearch.toLowerCase()) ||
+      item.location.toLowerCase().includes(recommendedSearch.toLowerCase())
+    );
+
+  // Category counts (computed from all internships, not filtered)
+  const categoryCounts = recommendedInternships.reduce<Record<string, number>>((acc, item) => {
+    acc[item.category] = (acc[item.category] || 0) + 1;
+    return acc;
+  }, {});
 
   const filterRef = useRef<HTMLDivElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
@@ -1034,6 +1106,175 @@ export default function Home() {
               ))}
             </motion.div>
 
+            {activeTab === "recommended" && (
+              <div>
+                {/* Category filter pills */}
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <motion.button
+                    onClick={() => setRecommendedCategory("all")}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                      recommendedCategory === "all"
+                        ? "bg-violet-500 text-white"
+                        : "bg-secondary text-muted-foreground hover:text-foreground"
+                    }`}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                  >
+                    All ({recommendedInternships.length})
+                  </motion.button>
+                  {INTERNSHIP_CATEGORIES.map((cat) => (
+                    <motion.button
+                      key={cat}
+                      onClick={() => setRecommendedCategory(recommendedCategory === cat ? "all" : cat)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                        recommendedCategory === cat
+                          ? "bg-violet-500 text-white"
+                          : "bg-secondary text-muted-foreground hover:text-foreground"
+                      }`}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                    >
+                      {cat} ({categoryCounts[cat] || 0})
+                    </motion.button>
+                  ))}
+                </div>
+
+                {/* Search bar for recommended */}
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input
+                      value={recommendedSearch}
+                      onChange={(e) => setRecommendedSearch(e.target.value)}
+                      placeholder="Search internships..."
+                      className="pl-9 pr-8 bg-transparent border-border text-sm h-8 placeholder:text-muted-foreground focus:border-ring focus:ring-0"
+                    />
+                    <AnimatePresence>
+                      {recommendedSearch && (
+                        <motion.button
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          onClick={() => setRecommendedSearch("")}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </motion.button>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  <span className="text-xs text-muted-foreground ml-auto">
+                    {recommendedLoading ? "Loading..." : `${filteredRecommended.length} internships`}
+                  </span>
+                </div>
+
+                {recommendedLoading ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-3">
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    >
+                      <Loader2 className="w-6 h-6 text-muted-foreground" />
+                    </motion.div>
+                    <p className="text-sm text-muted-foreground">Loading recommended internships...</p>
+                  </div>
+                ) : recommendedError ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-3">
+                    <AlertTriangle className="w-6 h-6 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">{recommendedError}</p>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        recommendedFetched.current = false;
+                        setActiveTab("custom");
+                        setTimeout(() => setActiveTab("recommended"), 0);
+                      }}
+                      className="text-xs"
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="border border-border rounded-lg">
+                    <div className="grid grid-cols-12 gap-4 px-5 py-3 bg-secondary/30 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      <div className="col-span-3">Company</div>
+                      <div className="col-span-4">Role</div>
+                      <div className="col-span-2">Location</div>
+                      <div className="col-span-1">Posted</div>
+                      <div className="col-span-2 text-right">Apply</div>
+                    </div>
+
+                    <div className="max-h-[600px] overflow-y-auto" ref={recommendedScrollRef} onScroll={handleRecommendedScroll}>
+                      {filteredRecommended.slice(0, recommendedDisplayCount).map((item, index) => (
+                        <div
+                          key={`${item.company}-${item.role}-${index}`}
+                          className="grid grid-cols-12 gap-4 px-5 py-3.5 items-center hover:bg-secondary/30 transition-colors group border-b border-border/50 last:border-b-0"
+                        >
+                          <div className="col-span-3 flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center text-muted-foreground text-sm font-medium shrink-0">
+                              {item.company.charAt(0)}
+                            </div>
+                            <span className="text-sm font-medium text-foreground truncate">
+                              {item.company}
+                            </span>
+                          </div>
+
+                          <div className="col-span-4">
+                            <span className="text-sm text-foreground/80 line-clamp-2">
+                              {item.role}
+                            </span>
+                          </div>
+
+                          <div className="col-span-2">
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <MapPin className="w-3 h-3 shrink-0" />
+                              <span className="truncate">{item.location}</span>
+                            </span>
+                          </div>
+
+                          <div className="col-span-1">
+                            <span className="text-xs text-muted-foreground">{item.posted}</span>
+                          </div>
+
+                          <div className="col-span-2 flex justify-end">
+                            <a
+                              href={item.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-violet-500/10 text-violet-500 hover:bg-violet-500/20 text-xs font-medium transition-colors hover:scale-105 active:scale-95"
+                            >
+                              Apply
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {filteredRecommended.length === 0 && !recommendedLoading && (
+                      <div className="px-5 py-12 text-center">
+                        <Briefcase className="w-5 h-5 text-muted-foreground mx-auto mb-3" />
+                        <p className="text-sm text-muted-foreground">
+                          {recommendedSearch ? "No internships match your search" : "No internships found"}
+                        </p>
+                      </div>
+                    )}
+
+                  </div>
+                )}
+
+                <div className="mt-4">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" />
+                    Sourced from SimplifyJobs/Summer2026-Internships
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "custom" && (
+            <>
             <AnimatePresence>
               {showForm && (
                 <motion.div
@@ -1700,6 +1941,8 @@ export default function Home() {
                 {filteredAndSortedApplications.length} of {applications.length} applications
               </p>
             </motion.div>
+            </>
+            )}
           </>
         )}
       </main>
