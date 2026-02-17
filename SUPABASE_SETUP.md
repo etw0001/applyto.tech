@@ -43,6 +43,38 @@ This will create:
 - Automatic profile creation on signup
 - Indexes for better query performance
 
+## 4b. Run Additional Migrations
+
+After running the main schema, also run these migrations in the SQL Editor:
+
+1. **Theme Support** (optional) - Run `supabase/migration_add_theme.sql`
+   - Adds theme preference to user profiles
+
+## 4c. Deploy the Delete User Edge Function
+
+The "Delete Account" button uses a Supabase Edge Function that deletes the auth user (profile + applications cascade automatically via `ON DELETE CASCADE`).
+
+### Deploy via Supabase CLI
+
+1. **Install Supabase CLI:**
+   ```bash
+   brew install supabase/tap/supabase
+   ```
+
+2. **Login, init, and link:**
+   ```bash
+   supabase login
+   supabase init
+   supabase link --project-ref YOUR_PROJECT_REF
+   ```
+   (Find your project ref in your Supabase URL: `https://YOUR_PROJECT_REF.supabase.co`)
+
+3. **Deploy the function:**
+   ```bash
+   supabase functions deploy delete-user --no-verify-jwt
+   ```
+   (`--no-verify-jwt` is needed because the function handles its own auth verification internally)
+
 ## 5. Enable Google OAuth
 
 ### Step 1: Create Google OAuth Credentials

@@ -292,6 +292,36 @@ export default function Home() {
             .eq('id', authUser.id)
             .single();
 
+          // If profile doesn't exist, create it
+          if (error && error.code === 'PGRST116') {
+            console.log('Profile not found, creating one...');
+            const { data: newProfile, error: createError } = await supabase
+              .from('profiles')
+              .insert({
+                id: authUser.id,
+                name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'User',
+                email: authUser.email || '',
+                avatar_url: authUser.user_metadata?.avatar_url || null,
+                theme: 'light',
+              })
+              .select()
+              .single();
+
+            if (createError) {
+              console.error('Error creating profile:', createError);
+              throw createError;
+            }
+
+            if (newProfile) {
+              setUser({
+                name: newProfile.name || authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'User',
+                email: newProfile.email || authUser.email || '',
+                avatar: newProfile.avatar_url || authUser.user_metadata?.avatar_url || (newProfile.name?.[0] || authUser.email?.[0] || 'U').toUpperCase(),
+              });
+              return;
+            }
+          }
+
           if (error) throw error;
 
           if (data) {
@@ -416,30 +446,49 @@ export default function Home() {
   const handleDeleteAccount = async () => {
     try {
       if (isSignedIn && authUser) {
-        // Delete all user's applications
-        const { error: appsError } = await supabase
-          .from('applications')
-          .delete()
-          .eq('user_id', authUser.id);
+        // Refresh session to get a fresh access token
+        const { data: { session: refreshedSession } } = await supabase.auth.refreshSession();
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        const session = refreshedSession || currentSession;
 
-        if (appsError) throw appsError;
+        if (!session?.access_token) {
+          alert('You must be signed in to delete your account. Please sign out and sign back in.');
+          return;
+        }
 
-        // Delete user profile
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .delete()
-          .eq('id', authUser.id);
+        // Call Edge Function to delete auth user + all data (tables cascade on delete)
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-        if (profileError) throw profileError;
+        const response = await fetch(`${supabaseUrl}/functions/v1/delete-user`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'apikey': supabaseAnonKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        });
 
-        // Sign out the user
-        await signOutUser();
+        if (!response.ok) {
+          const errorBody = await response.text();
+          throw new Error(`Failed to delete account (${response.status}): ${errorBody}`);
+        }
+
+        // Sign out locally (auth user is already deleted server-side)
+        try { await signOutUser(); } catch { /* expected — user no longer exists */ }
+
+        setUser(null);
+        setShowDeleteConfirm(false);
+        setShowSettings(false);
+      } else {
+        setUser(null);
+        setShowDeleteConfirm(false);
+        setShowSettings(false);
       }
-      setUser(null);
-      setShowDeleteConfirm(false);
-      setShowSettings(false);
     } catch (error) {
       console.error('Error deleting account:', error);
+      alert(`Failed to delete account: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
