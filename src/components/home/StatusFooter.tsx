@@ -33,14 +33,13 @@ export default function StatusFooter({ applications, filteredCount, statusFilter
                         >
                             <span className={`w-2 h-2 rounded-full ${isSelected ? dotColors[status] : statusConfig[status].bgColor}`} />
                             {statusConfig[status].label}
-                            <span className="text-muted-foreground">({count})</span>
                         </motion.button>
                     );
                 })}
             </div>
 
             <p className={footer.count}>
-                {filteredCount} of {applications.length} applications
+                {filteredCount} {filteredCount === 1 ? "application" : "applications"}
             </p>
         </motion.div>
     );

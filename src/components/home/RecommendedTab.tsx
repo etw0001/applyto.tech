@@ -259,7 +259,6 @@ export default function RecommendedTab({ applications, isSignedIn, onAddToTracke
 
             <div className="mt-4">
                 <p className={recommended.source}>
-                    <Sparkles className="w-3 h-3" />
                     Sourced from SimplifyJobs/Summer2026-Internships
                 </p>
             </div>

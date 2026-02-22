@@ -18,5 +18,8 @@ export default defineConfig({
       plugins: [],
     },
   },
+  optimizeDeps: {
+    include: ['lucide-react'],
+  },
 });
 

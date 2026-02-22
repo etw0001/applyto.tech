@@ -35,23 +35,49 @@ export default function Home() {
   const applications = (isSignedIn ? supabaseApplications : []) as import("@/types").Application[];
 
   // ─── UI State ────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<"recommended" | "custom">("custom");
+  const [activeTab, setActiveTabState] = useState<"recommended" | "custom">(() => {
+    const saved = localStorage.getItem("activeTab");
+    return (saved === "recommended" || saved === "custom") ? saved : "custom";
+  });
+
+  const setActiveTab = (tab: "recommended" | "custom") => {
+    setActiveTabState(tab);
+    localStorage.setItem("activeTab", tab);
+  };
   const [showForm, setShowForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
   const [sortBy, setSortBy] = useState<SortOption>("date-newest");
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    try {
+      const cached = localStorage.getItem("cached_profile");
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [openStatusDropdown, setOpenStatusDropdown] = useState<string | null>(null);
 
+  // ─── Helpers ──────────────────────────────────────────────
+  const setUserAndCache = (profile: UserProfile | null) => {
+    setUser(profile);
+    if (profile) {
+      localStorage.setItem("cached_profile", JSON.stringify(profile));
+    } else {
+      localStorage.removeItem("cached_profile");
+    }
+  };
+
   // ─── Theme ───────────────────────────────────────────────
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem("theme");
-    const isDark = saved ? saved === "dark" : false;
+    // Default to dark mode if no saved theme
+    const isDark = saved ? saved === "dark" : true;
     if (isDark) document.documentElement.classList.add("dark");
     else document.documentElement.classList.remove("dark");
     return isDark;
@@ -89,7 +115,7 @@ export default function Home() {
             if (createError) throw createError;
 
             if (newProfile) {
-              setUser({
+              setUserAndCache({
                 name: newProfile.name || authUser.user_metadata?.full_name || authUser.email?.split("@")[0] || "User",
                 email: newProfile.email || authUser.email || "",
                 avatar: newProfile.avatar_url || authUser.user_metadata?.avatar_url || (newProfile.name?.[0] || authUser.email?.[0] || "U").toUpperCase(),
@@ -101,7 +127,7 @@ export default function Home() {
           if (error) throw error;
 
           if (data) {
-            setUser({
+            setUserAndCache({
               name: data.name || authUser.user_metadata?.full_name || authUser.email?.split("@")[0] || "User",
               email: data.email || authUser.email || "",
               avatar: data.avatar_url || authUser.user_metadata?.avatar_url || (data.name?.[0] || authUser.email?.[0] || "U").toUpperCase(),
@@ -129,7 +155,7 @@ export default function Home() {
               supabase.from("profiles").update({ theme: currentTheme }).eq("id", authUser.id);
             }
           } else {
-            setUser({
+            setUserAndCache({
               name: authUser.user_metadata?.full_name || authUser.email?.split("@")[0] || "User",
               email: authUser.email || "",
               avatar: authUser.user_metadata?.avatar_url || (authUser.email?.[0] || "U").toUpperCase(),
@@ -137,21 +163,21 @@ export default function Home() {
           }
         } catch (error) {
           console.error("Error fetching user profile:", error);
-          setUser({
+          setUserAndCache({
             name: authUser.user_metadata?.full_name || authUser.email?.split("@")[0] || "User",
             email: authUser.email || "",
             avatar: authUser.user_metadata?.avatar_url || (authUser.email?.[0] || "U").toUpperCase(),
           });
         }
-      } else {
-        setUser(null);
-        // When not signed in, just ensure localStorage is respected (initial state already handles this)
-        // Don't override the state if it's already correct
+      } else if (!authLoading) {
+        // Only clear cache when auth has finished loading and user is definitely not signed in
+        // Don't clear during initial load when authUser is null but still resolving
+        setUserAndCache(null);
       }
     };
 
     fetchUserProfile();
-  }, [authUser]);
+  }, [authUser, authLoading]);
 
   // ─── Theme Persistence ───────────────────────────────────
   useEffect(() => {
@@ -200,7 +226,7 @@ export default function Home() {
   const handleSignOut = async () => {
     try {
       await signOutUser();
-      setUser(null);
+      setUserAndCache(null);
       setShowUserMenu(false);
     } catch (error) {
       console.error("Error signing out:", error);
@@ -240,7 +266,7 @@ export default function Home() {
         try { await signOutUser(); } catch { /* expected */ }
       }
 
-      setUser(null);
+      setUserAndCache(null);
       setShowDeleteConfirm(false);
       setShowSettings(false);
     } catch (error) {
@@ -309,7 +335,7 @@ export default function Home() {
       <Header
         darkMode={darkMode}
         setDarkMode={setDarkMode}
-        isSignedIn={isSignedIn}
+        isSignedIn={isSignedIn || !!user}
         user={user}
         showUserMenu={showUserMenu}
         setShowUserMenu={setShowUserMenu}
@@ -337,7 +363,7 @@ export default function Home() {
       />
 
       <main className={layout.main}>
-        {(authLoading || appsLoading) && isSignedIn ? (
+        {(authLoading && user) || ((authLoading || appsLoading) && isSignedIn) ? (
           <div className="flex items-center justify-center py-20">
             <div className="text-muted-foreground">Loading...</div>
           </div>
@@ -350,7 +376,7 @@ export default function Home() {
               className="mb-8"
             >
               <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground mb-1">
-                {isSignedIn ? `Welcome back, ${user?.name.split(" ")[0]}` : "Applications"}
+                {isSignedIn && user?.name ? `Welcome back, ${user.name.split(" ")[0]}` : isSignedIn ? "Welcome back" : "Welcome!"}
               </h1>
               <p className="text-muted-foreground text-sm">
                 {isSignedIn ? "Track your job search progress" : "Sign in to save your applications"}

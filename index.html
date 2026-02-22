@@ -28,7 +28,9 @@
 <body>
   <script>
     // Apply dark mode BEFORE React loads to prevent flash
-    if (localStorage.getItem('theme') === 'dark') {
+    // Default to dark mode if no theme is saved
+    const savedTheme = localStorage.getItem('theme');
+    if (!savedTheme || savedTheme === 'dark') {
       document.documentElement.classList.add('dark');
     }
   </script>

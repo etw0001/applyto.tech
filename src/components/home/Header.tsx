@@ -40,13 +40,6 @@ export default function Header({
                         animate={{ opacity: 1, x: 0 }}
                         className={header.logoWrapper}
                     >
-                        <motion.div
-                            className={header.logoIcon}
-                            whileHover={{ scale: 1.05, rotate: -5 }}
-                            transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                        >
-                            <img src="/rocket.png" alt="Rocket" className="w-full h-full object-contain" />
-                        </motion.div>
                         <span className="font-display font-bold text-2xl tracking-tight text-foreground">
                             applyto<span className="bg-gradient-to-r from-violet-500 to-indigo-500 bg-clip-text text-transparent">.tech</span>
                         </span>

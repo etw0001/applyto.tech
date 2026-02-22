@@ -26,7 +26,7 @@ export interface ParsedInternship {
 const CATEGORY_MAP: Record<string, InternshipCategory> = {
     'Software Engineering': 'Software Engineering',
     'Product Management': 'Product Management',
-    'Data Science, AI/ML': 'Data Science, AI/ML',
+    'Data Science, AI & Machine Learning': 'Data Science, AI/ML',
     'Quantitative Finance': 'Quantitative Finance',
     'Hardware Engineering': 'Hardware Engineering',
 };
