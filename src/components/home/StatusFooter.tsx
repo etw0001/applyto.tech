@@ -6,8 +6,8 @@ import type { Application, Status } from "@/types";
 interface StatusFooterProps {
     applications: Application[];
     filteredCount: number;
-    statusFilter: Status | "all";
-    setStatusFilter: (value: Status | "all") => void;
+    statusFilter: Status[];
+    setStatusFilter: (value: Status[]) => void;
 }
 
 export default function StatusFooter({ applications, filteredCount, statusFilter, setStatusFilter }: StatusFooterProps) {
@@ -21,11 +21,23 @@ export default function StatusFooter({ applications, filteredCount, statusFilter
             <div className={footer.filtersRow}>
                 {(Object.keys(statusConfig) as Status[]).map((status) => {
                     const count = applications.filter((app) => app.status === status).length;
-                    const isSelected = statusFilter === status;
+                    const isSelected = statusFilter.includes(status);
                     return (
                         <motion.button
                             key={status}
-                            onClick={() => setStatusFilter(statusFilter === status ? "all" : status)}
+                            onClick={() => {
+                                if (isSelected) {
+                                    // Remove from filter
+                                    setStatusFilter(statusFilter.filter(s => s !== status));
+                                } else {
+                                    // Add to filter in the correct order
+                                    const statusOrder: Status[] = ["applied", "interviewing", "offered", "rejected"];
+                                    const newFilter = [...statusFilter, status].sort((a, b) =>
+                                        statusOrder.indexOf(a) - statusOrder.indexOf(b)
+                                    );
+                                    setStatusFilter(newFilter);
+                                }
+                            }}
                             className={footer.filterButton(isSelected, statusConfig[status].color)}
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}

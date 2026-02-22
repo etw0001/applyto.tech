@@ -118,8 +118,8 @@ export default function Header({
                                             </div>
 
                                             <div className={header.menuDivider}>
-                                                <button onClick={onSignOut} className={header.menuItemMuted} data-testid="button-sign-out">
-                                                    <LogOut className="w-4 h-4" />
+                                                <button onClick={onSignOut} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-rose-500 dark:text-rose-500 hover:bg-secondary/50 hover:text-rose-400 dark:hover:text-rose-400 transition-colors" data-testid="button-sign-out">
+                                                    <LogOut className="w-4 h-4 text-rose-500 dark:text-rose-500" />
                                                     Sign out
                                                 </button>
                                             </div>

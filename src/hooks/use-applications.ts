@@ -37,20 +37,26 @@ export function useApplications(userId: string | undefined) {
                 if (error) throw error
 
                 // Transform database format to app format
-                const transformed = (data || []).map((app) => ({
-                    id: app.id,
-                    company: app.company,
-                    position: app.position,
-                    link: app.link || '',
-                    status: app.status as Status,
-                    dateApplied: new Date(app.date_applied).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "2-digit",
-                        year: "numeric"
-                    }),
-                    createdAt: app.created_at,
-                    updatedAt: app.updated_at,
-                }))
+                const transformed = (data || []).map((app) => {
+                    // Parse date string (YYYY-MM-DD) as local date to avoid timezone issues
+                    const [year, month, day] = app.date_applied.split('-').map(Number);
+                    const localDate = new Date(year, month - 1, day);
+                    
+                    return {
+                        id: app.id,
+                        company: app.company,
+                        position: app.position,
+                        link: app.link || '',
+                        status: app.status as Status,
+                        dateApplied: localDate.toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "2-digit",
+                            year: "numeric"
+                        }),
+                        createdAt: app.created_at,
+                        updatedAt: app.updated_at,
+                    };
+                })
 
                 setApplications(transformed)
                 setError(null)
@@ -89,6 +95,15 @@ export function useApplications(userId: string | undefined) {
     const addApplication = async (application: Omit<Application, 'id' | 'createdAt' | 'updatedAt'>) => {
         if (!userId) throw new Error('User not authenticated')
 
+        // Convert date string to YYYY-MM-DD format using local time to avoid timezone issues
+        const parseDateToLocal = (dateStr: string): string => {
+            const date = new Date(dateStr);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
         const { data, error } = await supabase
             .from('applications')
             .insert({
@@ -97,7 +112,7 @@ export function useApplications(userId: string | undefined) {
                 position: application.position,
                 link: application.link || null,
                 status: application.status,
-                date_applied: new Date(application.dateApplied).toISOString().split('T')[0],
+                date_applied: parseDateToLocal(application.dateApplied),
             })
             .select()
             .single()
@@ -105,13 +120,17 @@ export function useApplications(userId: string | undefined) {
         if (error) throw error
 
         // Transform and add to local state
+        // Parse date string (YYYY-MM-DD) as local date to avoid timezone issues
+        const [year, month, day] = data.date_applied.split('-').map(Number);
+        const localDate = new Date(year, month - 1, day);
+        
         const transformed: Application = {
             id: data.id,
             company: data.company,
             position: data.position,
             link: data.link || '',
             status: data.status as Status,
-            dateApplied: new Date(data.date_applied).toLocaleDateString("en-US", {
+            dateApplied: localDate.toLocaleDateString("en-US", {
                 month: "short",
                 day: "2-digit",
                 year: "numeric"
@@ -133,7 +152,12 @@ export function useApplications(userId: string | undefined) {
         if (updates.link !== undefined) updateData.link = updates.link || null
         if (updates.status) updateData.status = updates.status
         if (updates.dateApplied) {
-            updateData.date_applied = new Date(updates.dateApplied).toISOString().split('T')[0]
+            // Convert date string to YYYY-MM-DD format using local time to avoid timezone issues
+            const date = new Date(updates.dateApplied);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            updateData.date_applied = `${year}-${month}-${day}`;
         }
 
         const { error } = await supabase

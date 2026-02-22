@@ -10,8 +10,8 @@ import type { Status, SortOption } from "@/types";
 interface ApplicationToolbarProps {
     searchQuery: string;
     setSearchQuery: (value: string) => void;
-    statusFilter: Status | "all";
-    setStatusFilter: (value: Status | "all") => void;
+    statusFilter: Status[];
+    setStatusFilter: (value: Status[]) => void;
     sortBy: SortOption;
     setSortBy: (value: SortOption) => void;
     filterDropdownOpen: boolean;
@@ -88,11 +88,15 @@ export default function ApplicationToolbar({
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => { setFilterDropdownOpen(!filterDropdownOpen); setSortDropdownOpen(false); }}
-                    className={toolbar.filterButton(statusFilter !== "all")}
+                    className={toolbar.filterButton(statusFilter.length < 4)}
                     data-testid="button-filter-status"
                 >
                     <Filter className="w-3.5 h-3.5" />
-                    {statusFilter === "all" ? "All Status" : statusConfig[statusFilter].label}
+                    {statusFilter.length === 4
+                        ? "All"
+                        : statusFilter.length === 1
+                            ? statusConfig[statusFilter[0]].label
+                            : `${statusFilter.length} selected`}
                     <ChevronDown className="w-3 h-3" />
                 </motion.button>
                 <AnimatePresence>
@@ -107,25 +111,43 @@ export default function ApplicationToolbar({
                             <motion.button
                                 initial={{ opacity: 0, x: -10 }}
                                 animate={{ opacity: 1, x: 0 }}
-                                onClick={() => { setStatusFilter("all"); setFilterDropdownOpen(false); }}
-                                className={toolbar.dropdownItem(statusFilter === "all")}
+                                onClick={() => {
+                                    const allStatuses: Status[] = ["applied", "interviewing", "offered", "rejected"];
+                                    setStatusFilter(allStatuses);
+                                    setFilterDropdownOpen(false);
+                                }}
+                                className={toolbar.dropdownItem(statusFilter.length === 4)}
                                 data-testid="filter-all"
                             >
-                                All Status
+                                All
                             </motion.button>
-                            {(Object.keys(statusConfig) as Status[]).map((status, index) => (
-                                <motion.button
-                                    key={status}
-                                    initial={{ opacity: 0, x: -10 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ delay: (index + 1) * 0.03 }}
-                                    onClick={() => { setStatusFilter(status); setFilterDropdownOpen(false); }}
-                                    className={`w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${statusFilter === status ? statusConfig[status].color : "text-muted-foreground"}`}
-                                    data-testid={`filter-${status}`}
-                                >
-                                    {statusConfig[status].label}
-                                </motion.button>
-                            ))}
+                            {(Object.keys(statusConfig) as Status[]).map((status, index) => {
+                                const isSelected = statusFilter.includes(status);
+                                return (
+                                    <motion.button
+                                        key={status}
+                                        initial={{ opacity: 0, x: -10 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: (index + 1) * 0.03 }}
+                                        onClick={() => {
+                                            if (isSelected) {
+                                                setStatusFilter(statusFilter.filter(s => s !== status));
+                                            } else {
+                                                // Add status in the correct order
+                                                const statusOrder: Status[] = ["applied", "interviewing", "offered", "rejected"];
+                                                const newFilter = [...statusFilter, status].sort((a, b) =>
+                                                    statusOrder.indexOf(a) - statusOrder.indexOf(b)
+                                                );
+                                                setStatusFilter(newFilter);
+                                            }
+                                        }}
+                                        className={`w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${isSelected ? statusConfig[status].color : "text-muted-foreground"}`}
+                                        data-testid={`filter-${status}`}
+                                    >
+                                        {statusConfig[status].label}
+                                    </motion.button>
+                                );
+                            })}
                         </motion.div>
                     )}
                 </AnimatePresence>
@@ -173,12 +195,12 @@ export default function ApplicationToolbar({
 
             {/* Clear all */}
             <AnimatePresence>
-                {(statusFilter !== "all" || searchQuery) && (
+                {(statusFilter.length > 0 || searchQuery) && (
                     <motion.button
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.9 }}
-                        onClick={() => { setStatusFilter("all"); setSearchQuery(""); }}
+                        onClick={() => { setStatusFilter([]); setSearchQuery(""); }}
                         className={toolbar.clearAll}
                         data-testid="button-clear-filter"
                     >
@@ -202,7 +224,7 @@ export default function ApplicationToolbar({
                     >
                         <Button onClick={() => setShowForm(true)} size="sm" className={toolbar.addButton} data-testid="button-add-new">
                             <Plus className="w-3.5 h-3.5" />
-                            Add Application
+                            Track Application
                         </Button>
                     </motion.div>
                 )}

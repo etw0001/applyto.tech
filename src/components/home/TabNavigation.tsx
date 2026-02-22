@@ -24,7 +24,7 @@ export default function TabNavigation({ activeTab, setActiveTab }: TabNavigation
                 >
                     <span className="flex items-center gap-1.5">
                         {tab === "recommended" && <Sparkles className="w-3.5 h-3.5" />}
-                        {tab === "custom" ? "My Applications" : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                        {tab === "custom" ? "My Applications" : "Discover"}
                     </span>
                     {activeTab === tab && (
                         <motion.div

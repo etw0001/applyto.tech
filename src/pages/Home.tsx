@@ -3,20 +3,20 @@ import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/use-auth";
 import { useApplications } from "@/hooks/use-applications";
 import { supabase } from "@/lib/supabase";
-import { layout } from "@/styles/home";
+import { layout, footer } from "@/styles/home";
 import type { Status, SortOption, UserProfile } from "@/types";
 
 // ─── Components ──────────────────────────────────────────
 import Header from "@/components/home/Header";
 import SettingsModal from "@/components/home/SettingsModal";
 import DeleteConfirmModal from "@/components/home/DeleteConfirmModal";
+import PrivacyPolicyModal from "@/components/home/PrivacyPolicyModal";
 import StatsCards from "@/components/home/StatsCards";
 import TabNavigation from "@/components/home/TabNavigation";
 import RecommendedTab from "@/components/home/RecommendedTab";
 import ApplicationForm from "@/components/home/ApplicationForm";
 import ApplicationToolbar from "@/components/home/ApplicationToolbar";
 import ApplicationTable from "@/components/home/ApplicationTable";
-import StatusFooter from "@/components/home/StatusFooter";
 
 export default function Home() {
   // ─── Auth ────────────────────────────────────────────────
@@ -32,7 +32,118 @@ export default function Home() {
     deleteApplication: deleteApplicationFromDB,
   } = useApplications(authUser?.id);
 
-  const applications = (isSignedIn ? supabaseApplications : []) as import("@/types").Application[];
+  // ─── LocalStorage Applications (for signed out users) ────
+  const [localStorageApplications, setLocalStorageApplications] = useState<import("@/types").Application[]>(() => {
+    if (isSignedIn) return [];
+    try {
+      const stored = localStorage.getItem("localStorage_applications");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Load localStorage applications when signed out
+  useEffect(() => {
+    if (!isSignedIn) {
+      try {
+        const stored = localStorage.getItem("localStorage_applications");
+        setLocalStorageApplications(stored ? JSON.parse(stored) : []);
+      } catch {
+        setLocalStorageApplications([]);
+      }
+    } else {
+      setLocalStorageApplications([]);
+    }
+  }, [isSignedIn]);
+
+  // Migrate localStorage applications to database for NEW accounts
+  useEffect(() => {
+    // Only proceed if user is signed in and we have their auth profile
+    if (!isSignedIn || !authUser || !authUser.created_at) return;
+
+    // Check if the account was created recently (within the last 2 minutes)
+    // This reliably tells us if it's a completely new account.
+    const isNewAccount = new Date().getTime() - new Date(authUser.created_at).getTime() < 120000;
+
+    const migrateData = async () => {
+      try {
+        const stored = localStorage.getItem("localStorage_applications");
+        if (!stored) return;
+
+        const localApps = JSON.parse(stored);
+
+        // Remove from local storage immediately to prevent duplicate runs (React StrictMode)
+        localStorage.removeItem("localStorage_applications");
+
+        // If it's NOT a new account, we don't migrate. We just cleaned up the local storage.
+        if (!isNewAccount) {
+          // Clean up week count for signed out user
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.startsWith('week_net_count_signedout_')) {
+              localStorage.removeItem(key);
+            }
+          });
+          return;
+        }
+
+        // It IS a new account, so we migrate data.
+        if (Array.isArray(localApps) && localApps.length > 0) {
+          for (const app of localApps) {
+            try {
+              await addApplicationToDB({
+                company: app.company,
+                position: app.position,
+                link: app.link || '',
+                status: app.status,
+                dateApplied: app.dateApplied,
+              });
+            } catch (err) {
+              console.error("Failed to migrate app:", err);
+            }
+          }
+        }
+
+        // Migrate "This Week" count if applicable
+        try {
+          const now = new Date();
+          const dayOfWeek = now.getDay();
+          const startOfWeek = new Date(now);
+          startOfWeek.setDate(now.getDate() - dayOfWeek);
+          startOfWeek.setHours(0, 0, 0, 0);
+          const weekId = startOfWeek.toISOString().split('T')[0];
+
+          const signedOutCount = localStorage.getItem(`week_net_count_signedout_${weekId}`);
+          if (signedOutCount) {
+            const count = parseInt(signedOutCount, 10);
+            if (count > 0 && isNewAccount) {
+              localStorage.setItem(`week_net_count_signedin_${weekId}`, signedOutCount);
+            }
+          }
+        } catch (err) {
+          console.error("Failed to migrate week count:", err);
+        }
+
+        // Clean up signed-out week counts
+        try {
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.startsWith('week_net_count_signedout_')) {
+              localStorage.removeItem(key);
+            }
+          });
+        } catch (err) { }
+
+      } catch (e) {
+        console.error("Migration error:", e);
+      }
+    };
+
+    migrateData();
+  }, [isSignedIn, authUser, addApplicationToDB]);
+
+  const applications = (isSignedIn ? supabaseApplications : localStorageApplications) as import("@/types").Application[];
 
   // ─── UI State ────────────────────────────────────────────
   const [activeTab, setActiveTabState] = useState<"recommended" | "custom">(() => {
@@ -45,7 +156,7 @@ export default function Home() {
     localStorage.setItem("activeTab", tab);
   };
   const [showForm, setShowForm] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<Status[]>(["applied", "interviewing", "offered", "rejected"]);
   const [sortBy, setSortBy] = useState<SortOption>("date-newest");
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false);
@@ -61,6 +172,7 @@ export default function Home() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [openStatusDropdown, setOpenStatusDropdown] = useState<string | null>(null);
 
   // ─── Helpers ──────────────────────────────────────────────
@@ -288,12 +400,85 @@ export default function Home() {
   const handleAddApplication = async (formData: { company: string; position: string; link: string; status: Status; dateApplied: string }) => {
     if (isSignedIn) {
       await addApplicationToDB(formData);
+
+      // Check if the application date is in the current week and increment count
+      try {
+        const appDate = new Date(formData.dateApplied);
+        if (!isNaN(appDate.getTime())) {
+          // Calculate current week bounds (Sunday to Saturday)
+          const now = new Date();
+          const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+          const startOfWeek = new Date(now);
+          startOfWeek.setDate(now.getDate() - dayOfWeek);
+          startOfWeek.setHours(0, 0, 0, 0);
+          const endOfWeek = new Date(startOfWeek);
+          endOfWeek.setDate(startOfWeek.getDate() + 6);
+          endOfWeek.setHours(23, 59, 59, 999);
+
+          if (appDate >= startOfWeek && appDate <= endOfWeek) {
+            // Application is from this week, increment the count
+            if ((window as any).incrementWeekCount) {
+              (window as any).incrementWeekCount();
+            }
+          }
+        }
+      } catch (error) {
+        // If date parsing fails, ignore it
+      }
+    } else {
+      // Store in localStorage for signed out users
+      const newApp: import("@/types").Application = {
+        id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        company: formData.company,
+        position: formData.position,
+        link: formData.link || '',
+        status: formData.status,
+        dateApplied: formData.dateApplied,
+      };
+
+      const updated = [newApp, ...localStorageApplications];
+      setLocalStorageApplications(updated);
+      localStorage.setItem("localStorage_applications", JSON.stringify(updated));
+
+      // Check if the application date is in the current week and increment count
+      try {
+        const appDate = new Date(formData.dateApplied);
+        if (!isNaN(appDate.getTime())) {
+          const now = new Date();
+          const dayOfWeek = now.getDay();
+          const startOfWeek = new Date(now);
+          startOfWeek.setDate(now.getDate() - dayOfWeek);
+          startOfWeek.setHours(0, 0, 0, 0);
+          const endOfWeek = new Date(startOfWeek);
+          endOfWeek.setDate(startOfWeek.getDate() + 6);
+          endOfWeek.setHours(23, 59, 59, 999);
+
+          if (appDate >= startOfWeek && appDate <= endOfWeek) {
+            if ((window as any).incrementWeekCount) {
+              (window as any).incrementWeekCount();
+            }
+          }
+        }
+      } catch (error) {
+        // If date parsing fails, ignore it
+      }
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
-      if (isSignedIn) await deleteApplicationFromDB(id);
+      if (isSignedIn) {
+        await deleteApplicationFromDB(id);
+      } else {
+        // Delete from localStorage
+        const updated = localStorageApplications.filter(app => app.id !== id);
+        setLocalStorageApplications(updated);
+        localStorage.setItem("localStorage_applications", JSON.stringify(updated));
+      }
+      // Decrement "this week" counter when any application is deleted
+      if ((window as any).decrementWeekCount) {
+        (window as any).decrementWeekCount();
+      }
     } catch (error) {
       console.error("Error deleting application:", error);
     }
@@ -301,7 +486,16 @@ export default function Home() {
 
   const handleStatusChange = async (id: string, newStatus: Status) => {
     try {
-      if (isSignedIn) await updateApplicationInDB(id, { status: newStatus });
+      if (isSignedIn) {
+        await updateApplicationInDB(id, { status: newStatus });
+      } else {
+        // Update in localStorage
+        const updated = localStorageApplications.map(app =>
+          app.id === id ? { ...app, status: newStatus } : app
+        );
+        setLocalStorageApplications(updated);
+        localStorage.setItem("localStorage_applications", JSON.stringify(updated));
+      }
       setOpenStatusDropdown(null);
     } catch (error) {
       console.error("Error updating status:", error);
@@ -310,7 +504,7 @@ export default function Home() {
 
   // ─── Derived Data ────────────────────────────────────────
   const filteredAndSortedApplications = applications
-    .filter((app) => statusFilter === "all" || app.status === statusFilter)
+    .filter((app) => statusFilter.includes(app.status))
     .filter(
       (app) =>
         searchQuery === "" ||
@@ -354,12 +548,18 @@ export default function Home() {
         setDarkMode={setDarkMode}
         onExport={handleExportData}
         onDeleteAccount={() => setShowDeleteConfirm(true)}
+        onOpenPrivacyPolicy={() => { setShowPrivacyPolicy(true); setShowSettings(false); }}
       />
 
       <DeleteConfirmModal
         show={showDeleteConfirm}
         onClose={() => setShowDeleteConfirm(false)}
         onConfirm={handleDeleteAccount}
+      />
+
+      <PrivacyPolicyModal
+        show={showPrivacyPolicy}
+        onClose={() => { setShowPrivacyPolicy(false); setShowSettings(true); }}
       />
 
       <main className={layout.main}>
@@ -376,14 +576,14 @@ export default function Home() {
               className="mb-8"
             >
               <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground mb-1">
-                {isSignedIn && user?.name ? `Welcome back, ${user.name.split(" ")[0]}` : isSignedIn ? "Welcome back" : "Welcome!"}
+                {isSignedIn && user?.name ? `Hello, ${user.name.split(" ")[0]}!` : isSignedIn ? "Welcome back" : "Welcome!"}
               </h1>
               <p className="text-muted-foreground text-sm">
                 {isSignedIn ? "Track your job search progress" : "Sign in to save your applications"}
               </p>
             </motion.div>
 
-            <StatsCards applications={applications} />
+            <StatsCards applications={applications} isSignedIn={isSignedIn} />
 
             <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
 
@@ -423,17 +623,13 @@ export default function Home() {
                   darkMode={darkMode}
                   searchQuery={searchQuery}
                   statusFilter={statusFilter}
+                  sortBy={sortBy}
+                  setSortBy={setSortBy}
+                  setStatusFilter={setStatusFilter}
                   openStatusDropdown={openStatusDropdown}
                   setOpenStatusDropdown={setOpenStatusDropdown}
                   onStatusChange={handleStatusChange}
                   onDelete={handleDelete}
-                />
-
-                <StatusFooter
-                  applications={applications}
-                  filteredCount={filteredAndSortedApplications.length}
-                  statusFilter={statusFilter}
-                  setStatusFilter={setStatusFilter}
                 />
               </>
             )}

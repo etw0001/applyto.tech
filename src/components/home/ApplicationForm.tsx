@@ -63,8 +63,27 @@ export default function ApplicationForm({ show, onClose, onSubmit }: Application
 
     const handleSubmit = async () => {
         if (!formData.company || !formData.position) return;
+
+        // Create a copy of the formData to submit
+        const dataToSubmit = { ...formData };
+
+        // Sanitize the link to prevent javascript: XSS attacks
+        if (dataToSubmit.link) {
+            let safeLink = dataToSubmit.link.trim();
+            // If it doesn't start with http:// or https://, prepend https://
+            if (!/^https?:\/\//i.test(safeLink)) {
+                // Check if it's a malicious scheme masquerading without http
+                if (safeLink.toLowerCase().startsWith('javascript:') || safeLink.toLowerCase().startsWith('data:')) {
+                    safeLink = ""; // Clear the malicious link
+                } else {
+                    safeLink = `https://${safeLink}`;
+                }
+            }
+            dataToSubmit.link = safeLink;
+        }
+
         try {
-            await onSubmit(formData);
+            await onSubmit(dataToSubmit);
             setShowSuccess(true);
             setTimeout(() => {
                 setShowSuccess(false);
@@ -139,7 +158,7 @@ export default function ApplicationForm({ show, onClose, onSubmit }: Application
 
                             <motion.div className="space-y-1.5" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15 }}>
                                 <label className={form.fieldLabel}><Briefcase className="w-3 h-3" />Position</label>
-                                <Input value={formData.position} onChange={(e) => setFormData({ ...formData, position: e.target.value })} placeholder="Frontend Engineer" className={form.fieldInput} data-testid="input-position" />
+                                <Input value={formData.position} onChange={(e) => setFormData({ ...formData, position: e.target.value })} placeholder="Software Engineer" className={form.fieldInput} data-testid="input-position" />
                             </motion.div>
 
                             <motion.div className="space-y-1.5" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }}>
@@ -172,11 +191,16 @@ export default function ApplicationForm({ show, onClose, onSubmit }: Application
                                     <Input
                                         type="date"
                                         value={dateInputValue}
+                                        max={getTodayDateString()}
                                         onChange={(e) => {
-                                            setDateInputValue(e.target.value);
-                                            setFormData({ ...formData, dateApplied: new Date(e.target.value).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) });
+                                            const selectedDate = e.target.value;
+                                            // Prevent selecting future dates
+                                            if (selectedDate <= getTodayDateString()) {
+                                                setDateInputValue(selectedDate);
+                                                setFormData({ ...formData, dateApplied: new Date(selectedDate).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) });
+                                            }
                                         }}
-                                        className="bg-secondary/50 border-border text-sm h-9 focus:border-ring focus:ring-0 transition-all text-foreground pr-8"
+                                        className="bg-secondary/50 border border-border text-sm h-9 hover:border-ring focus:border-ring focus:outline-none focus:ring-0 focus-visible:ring-0 transition-all text-foreground pr-8"
                                         data-testid="input-date"
                                     />
                                 </div>

@@ -11,6 +11,7 @@ interface SettingsModalProps {
     setDarkMode: (value: boolean) => void;
     onExport: () => void;
     onDeleteAccount: () => void;
+    onOpenPrivacyPolicy: () => void;
 }
 
 export default function SettingsModal({
@@ -21,6 +22,7 @@ export default function SettingsModal({
     setDarkMode,
     onExport,
     onDeleteAccount,
+    onOpenPrivacyPolicy,
 }: SettingsModalProps) {
     return (
         <AnimatePresence>
@@ -106,7 +108,7 @@ export default function SettingsModal({
                                             <p className="text-xs text-muted-foreground">Download all your applications</p>
                                         </div>
                                     </button>
-                                    <button className={modal.settingsButton}>
+                                    <button onClick={onOpenPrivacyPolicy} className={modal.settingsButton} data-testid="button-privacy-policy">
                                         <Shield className="w-4 h-4 text-muted-foreground" />
                                         <div>
                                             <p className="text-sm text-foreground">Privacy Policy</p>
@@ -120,10 +122,10 @@ export default function SettingsModal({
                             <div>
                                 <h3 className={modal.sectionTitleDanger}>Danger Zone</h3>
                                 <button onClick={onDeleteAccount} className={modal.deleteButton} data-testid="button-delete-account">
-                                    <Trash2 className="w-4 h-4 text-red-400" />
+                                    <Trash2 className="w-4 h-4 text-rose-500" />
                                     <div>
-                                        <p className="text-sm text-red-400">Delete Account</p>
-                                        <p className="text-xs text-red-400/60">Permanently delete your account and data</p>
+                                        <p className="text-sm text-rose-500">Delete Account</p>
+                                        <p className="text-xs text-rose-500/60">Permanently delete your account and data</p>
                                     </div>
                                 </button>
                             </div>

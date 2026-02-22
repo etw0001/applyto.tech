@@ -22,7 +22,6 @@ export default function RecommendedTab({ applications, isSignedIn, onAddToTracke
     const [displayCount, setDisplayCount] = useState(100);
     const [addingItems, setAddingItems] = useState<Set<string>>(new Set());
     const fetched = useRef(false);
-    const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (!fetched.current) {
@@ -33,19 +32,6 @@ export default function RecommendedTab({ applications, isSignedIn, onAddToTracke
                 .then((data) => setInternships(data || []))
                 .catch(() => setError("Failed to load recommended internships. Please try again."))
                 .finally(() => setLoading(false));
-        }
-    }, []);
-
-    useEffect(() => {
-        setDisplayCount(100);
-        if (scrollRef.current) scrollRef.current.scrollTop = 0;
-    }, [search, category]);
-
-    const handleScroll = useCallback(() => {
-        const el = scrollRef.current;
-        if (!el) return;
-        if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
-            setDisplayCount((prev) => prev + 100);
         }
     }, []);
 
@@ -69,6 +55,32 @@ export default function RecommendedTab({ applications, isSignedIn, onAddToTracke
                 item.role.toLowerCase().includes(search.toLowerCase()) ||
                 item.location.toLowerCase().includes(search.toLowerCase())
         );
+
+    useEffect(() => {
+        setDisplayCount(100);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, [search, category]);
+
+    const handleScroll = useCallback(() => {
+        // Check if user is near the bottom of the page
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        const windowHeight = window.innerHeight;
+        const documentHeight = document.documentElement.scrollHeight;
+
+        // Load more when within 500px of bottom
+        if (documentHeight - (scrollTop + windowHeight) < 500) {
+            setDisplayCount((prev) => {
+                const next = prev + 100;
+                // Don't load more than the total filtered items
+                return Math.min(next, filtered.length);
+            });
+        }
+    }, [filtered.length]);
+
+    useEffect(() => {
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, [handleScroll]);
 
     const categoryCounts = untrackedInternships.reduce<Record<string, number>>((acc, item) => {
         acc[item.category] = (acc[item.category] || 0) + 1;
@@ -193,7 +205,7 @@ export default function RecommendedTab({ applications, isSignedIn, onAddToTracke
                         <div className="col-span-3 text-right">Actions</div>
                     </div>
 
-                    <div className="max-h-[600px] overflow-y-auto" ref={scrollRef} onScroll={handleScroll}>
+                    <div>
                         {filtered.slice(0, displayCount).map((item, index) => {
                             const itemKey = `${item.company}|${item.role}`;
                             const isAdding = addingItems.has(itemKey);
@@ -220,22 +232,20 @@ export default function RecommendedTab({ applications, isSignedIn, onAddToTracke
                                         <span className="text-xs text-muted-foreground">{item.posted}</span>
                                     </div>
                                     <div className="col-span-3 flex justify-end gap-2">
-                                        {isSignedIn && (
-                                            <motion.button
-                                                onClick={() => handleAddToTracker(item)}
-                                                disabled={isAdding}
-                                                className={recommended.addButton}
-                                                whileHover={{ scale: 1.05 }}
-                                                whileTap={{ scale: 0.95 }}
-                                            >
-                                                {isAdding ? (
-                                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                                ) : (
-                                                    <Plus className="w-3 h-3" />
-                                                )}
-                                                {isAdding ? "Adding..." : "Track"}
-                                            </motion.button>
-                                        )}
+                                        <motion.button
+                                            onClick={() => handleAddToTracker(item)}
+                                            disabled={isAdding}
+                                            className={recommended.addButton}
+                                            whileHover={{ scale: 1.05 }}
+                                            whileTap={{ scale: 0.95 }}
+                                        >
+                                            {isAdding ? (
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                            ) : (
+                                                <Plus className="w-3 h-3" />
+                                            )}
+                                            {isAdding ? "Adding..." : "Track"}
+                                        </motion.button>
                                         <a href={item.link} target="_blank" rel="noopener noreferrer" className={recommended.applyButton}>
                                             Apply
                                             <ExternalLink className="w-3 h-3" />
