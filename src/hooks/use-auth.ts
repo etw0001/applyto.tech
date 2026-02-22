@@ -74,6 +74,31 @@ export function useAuth() {
         return () => subscription.unsubscribe()
     }, [])
 
+    useEffect(() => {
+        if (!user?.id) return
+
+        const channel = supabase
+            .channel(`profile-deletions-${user.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'DELETE',
+                    schema: 'public',
+                    table: 'profiles',
+                    filter: `id=eq.${user.id}`
+                },
+                async () => {
+                    console.log('User profile deleted remotely. Signing out...')
+                    await supabase.auth.signOut()
+                }
+            )
+            .subscribe()
+
+        return () => {
+            supabase.removeChannel(channel)
+        }
+    }, [user?.id])
+
     const signInWithGoogle = async () => {
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',

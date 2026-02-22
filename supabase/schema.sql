@@ -119,3 +119,16 @@ create trigger set_updated_at_profiles
 create index if not exists applications_user_id_idx on public.applications(user_id);
 create index if not exists applications_status_idx on public.applications(status);
 create index if not exists applications_date_applied_idx on public.applications(date_applied);
+
+-- Automatically delete all applications when a profile is deleted
+create or replace function public.handle_profile_deleted()
+returns trigger as $$
+begin
+  delete from public.applications where user_id = old.id;
+  return old;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_profile_deleted
+  before delete on public.profiles
+  for each row execute function public.handle_profile_deleted();
