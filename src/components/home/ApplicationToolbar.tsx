@@ -193,18 +193,22 @@ export default function ApplicationToolbar({
                 </AnimatePresence>
             </div>
 
-            {/* Clear all */}
+            {/* Reset */}
             <AnimatePresence>
-                {(statusFilter.length > 0 || searchQuery) && (
+                {(statusFilter.length < 4 || searchQuery || sortBy !== "date-newest") && (
                     <motion.button
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.9 }}
-                        onClick={() => { setStatusFilter([]); setSearchQuery(""); }}
+                        onClick={() => {
+                            setStatusFilter(["applied", "interviewing", "offered", "rejected"]);
+                            setSearchQuery("");
+                            setSortBy("date-newest");
+                        }}
                         className={toolbar.clearAll}
-                        data-testid="button-clear-filter"
+                        data-testid="button-reset"
                     >
-                        Clear all
+                        Reset
                     </motion.button>
                 )}
             </AnimatePresence>

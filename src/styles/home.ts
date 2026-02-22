@@ -74,9 +74,9 @@ export const tabs = {
 // ─── Recommended Tab ─────────────────────────────────────
 export const recommended = {
     pill: (active: boolean) =>
-        `px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${active ? "bg-violet-500 text-white" : "bg-secondary text-muted-foreground hover:text-foreground"}`,
+        `px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${active ? "bg-black dark:bg-white text-white dark:text-black" : "bg-secondary text-muted-foreground hover:text-foreground"}`,
     categoryPill: (active: boolean) =>
-        `px-3 py-1.5 rounded-full text-xs font-medium transition-colors text-center ${active ? "bg-violet-500 text-white" : "bg-secondary text-muted-foreground hover:text-foreground"}`,
+        `px-3 py-1.5 rounded-full text-xs font-medium transition-colors text-center ${active ? "bg-black dark:bg-white text-white dark:text-black" : "bg-secondary text-muted-foreground hover:text-foreground"}`,
     searchWrapper: "relative flex-1 max-w-sm",
     searchIcon: "absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground",
     searchInput: "pl-9 pr-8 bg-transparent border border-border text-sm h-8 placeholder:text-muted-foreground hover:border-ring focus:bg-transparent focus:border-ring focus:ring-0 focus-visible:ring-0 rounded-lg transition-colors",
@@ -85,9 +85,9 @@ export const recommended = {
     tableHeader: "grid grid-cols-12 gap-4 px-5 py-3 bg-secondary/30 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wider",
     tableRow: "grid grid-cols-12 gap-4 px-5 py-3.5 items-center hover:bg-secondary/30 transition-colors group border-b border-border/50 last:border-b-0",
     companyAvatar: "w-8 h-8 rounded-md bg-secondary flex items-center justify-center text-muted-foreground text-sm font-medium shrink-0",
-    applyButton: "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-violet-500/10 text-violet-500 hover:bg-violet-500/20 text-xs font-medium transition-colors hover:scale-105 active:scale-95",
+    applyButton: "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md dark:bg-white dark:text-black dark:hover:bg-gray-100 bg-foreground text-background hover:opacity-90 text-xs font-medium transition-colors hover:scale-105 active:scale-95",
     addedButton: "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/10 text-emerald-500 text-xs font-medium cursor-default",
-    addButton: "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 text-xs font-medium transition-colors hover:scale-105 active:scale-95",
+    addButton: "inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-md dark:bg-gradient-to-r dark:from-violet-500 dark:to-indigo-500 dark:hover:from-violet-600 dark:hover:to-indigo-600 dark:text-white bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 text-white text-xs font-medium transition-colors hover:scale-105 active:scale-95",
     source: "text-xs text-muted-foreground flex items-center gap-1",
     emptyState: "px-5 py-12 text-center",
 };
@@ -123,7 +123,7 @@ export const toolbar = {
     dropdownItem: (active: boolean) =>
         `w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${active ? "text-foreground" : "text-muted-foreground"}`,
     clearAll: "text-xs text-muted-foreground hover:text-foreground transition-colors",
-    addButton: "bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 text-white border-0 gap-1.5 font-medium text-sm h-8 rounded-lg shadow-sm",
+    addButton: "bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 dark:bg-gradient-to-r dark:from-violet-500 dark:to-indigo-500 dark:hover:from-violet-600 dark:hover:to-indigo-600 text-white border-0 gap-1.5 font-medium text-sm h-8 rounded-lg shadow-sm",
 };
 
 // ─── Application Table ───────────────────────────────────
@@ -150,19 +150,19 @@ export const statusBadge = {
         const colors: Record<Status, { dark: string; light: string }> = {
             applied: {
                 dark: "bg-[#3b82f6]/15 text-[#3b82f6] shadow-[#3b82f6]/10",
-                light: "bg-[#3b82f6]/12 text-[#3b82f6] shadow-[#3b82f6]/8",
+                light: "bg-[#3b82f6]/10 text-[#3b82f6] shadow-[#3b82f6]/8",
             },
             interviewing: {
                 dark: "bg-[#f59e0b]/15 text-[#f59e0b] shadow-[#f59e0b]/10",
-                light: "bg-[#f59e0b]/12 text-[#f59e0b] shadow-[#f59e0b]/8",
+                light: "bg-[#f59e0b]/10 text-[#f59e0b] shadow-[#f59e0b]/8",
             },
             offered: {
                 dark: "bg-[#22c55e]/15 text-[#22c55e] shadow-[#22c55e]/10",
-                light: "bg-[#22c55e]/12 text-[#22c55e] shadow-[#22c55e]/8",
+                light: "bg-[#22c55e]/10 text-[#22c55e] shadow-[#22c55e]/8",
             },
             rejected: {
                 dark: "bg-rose-500/15 text-rose-500 shadow-rose-500/10",
-                light: "bg-rose-500/12 text-rose-500 shadow-rose-500/8",
+                light: "bg-rose-500/10 text-rose-500 shadow-rose-500/8",
             },
         };
         return darkMode ? colors[status].dark : colors[status].light;

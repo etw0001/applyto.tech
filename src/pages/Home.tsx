@@ -43,7 +43,7 @@ export default function Home() {
     }
   });
 
-  // Load localStorage applications when signed out
+  // Load localStorage applications when signed out, clear when signed in
   useEffect(() => {
     if (!isSignedIn) {
       try {
@@ -53,95 +53,24 @@ export default function Home() {
         setLocalStorageApplications([]);
       }
     } else {
+      // Clear localStorage applications and week counts when signing in
       setLocalStorageApplications([]);
+      try {
+        // Clear localStorage applications
+        localStorage.removeItem("localStorage_applications");
+        // Clear all signed-out week count keys
+        const keys = Object.keys(localStorage);
+        keys.forEach(key => {
+          if (key.startsWith('week_net_count_signedout_')) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch {
+        // Ignore localStorage errors
+      }
     }
   }, [isSignedIn]);
 
-  // Migrate localStorage applications to database for NEW accounts
-  useEffect(() => {
-    // Only proceed if user is signed in and we have their auth profile
-    if (!isSignedIn || !authUser || !authUser.created_at) return;
-
-    // Check if the account was created recently (within the last 2 minutes)
-    // This reliably tells us if it's a completely new account.
-    const isNewAccount = new Date().getTime() - new Date(authUser.created_at).getTime() < 120000;
-
-    const migrateData = async () => {
-      try {
-        const stored = localStorage.getItem("localStorage_applications");
-        if (!stored) return;
-
-        const localApps = JSON.parse(stored);
-
-        // Remove from local storage immediately to prevent duplicate runs (React StrictMode)
-        localStorage.removeItem("localStorage_applications");
-
-        // If it's NOT a new account, we don't migrate. We just cleaned up the local storage.
-        if (!isNewAccount) {
-          // Clean up week count for signed out user
-          const keys = Object.keys(localStorage);
-          keys.forEach(key => {
-            if (key.startsWith('week_net_count_signedout_')) {
-              localStorage.removeItem(key);
-            }
-          });
-          return;
-        }
-
-        // It IS a new account, so we migrate data.
-        if (Array.isArray(localApps) && localApps.length > 0) {
-          for (const app of localApps) {
-            try {
-              await addApplicationToDB({
-                company: app.company,
-                position: app.position,
-                link: app.link || '',
-                status: app.status,
-                dateApplied: app.dateApplied,
-              });
-            } catch (err) {
-              console.error("Failed to migrate app:", err);
-            }
-          }
-        }
-
-        // Migrate "This Week" count if applicable
-        try {
-          const now = new Date();
-          const dayOfWeek = now.getDay();
-          const startOfWeek = new Date(now);
-          startOfWeek.setDate(now.getDate() - dayOfWeek);
-          startOfWeek.setHours(0, 0, 0, 0);
-          const weekId = startOfWeek.toISOString().split('T')[0];
-
-          const signedOutCount = localStorage.getItem(`week_net_count_signedout_${weekId}`);
-          if (signedOutCount) {
-            const count = parseInt(signedOutCount, 10);
-            if (count > 0 && isNewAccount) {
-              localStorage.setItem(`week_net_count_signedin_${weekId}`, signedOutCount);
-            }
-          }
-        } catch (err) {
-          console.error("Failed to migrate week count:", err);
-        }
-
-        // Clean up signed-out week counts
-        try {
-          const keys = Object.keys(localStorage);
-          keys.forEach(key => {
-            if (key.startsWith('week_net_count_signedout_')) {
-              localStorage.removeItem(key);
-            }
-          });
-        } catch (err) { }
-
-      } catch (e) {
-        console.error("Migration error:", e);
-      }
-    };
-
-    migrateData();
-  }, [isSignedIn, authUser, addApplicationToDB]);
 
   const applications = (isSignedIn ? supabaseApplications : localStorageApplications) as import("@/types").Application[];
 
@@ -376,6 +305,18 @@ export default function Home() {
         }
 
         try { await signOutUser(); } catch { /* expected */ }
+      }
+
+      // Clear all week stats from localStorage
+      try {
+        const keys = Object.keys(localStorage);
+        keys.forEach(key => {
+          if (key.startsWith('week_net_count_signedin_') || key.startsWith('week_net_count_signedout_')) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch (error) {
+        console.error("Error clearing week stats from localStorage:", error);
       }
 
       setUserAndCache(null);

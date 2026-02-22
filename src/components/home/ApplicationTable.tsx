@@ -183,13 +183,13 @@ export default function ApplicationTable({
                                             // Explicit date-newest - show down arrow
                                             return <ChevronDown className="w-3 h-3 text-foreground" />;
                                         } else {
-                                            // Default state - show up/down arrows
-                                            return <ArrowUpDown className="w-3 h-3 text-muted-foreground" />;
+                                            // Default state - show down arrow
+                                            return <ChevronDown className="w-3 h-3 text-muted-foreground" />;
                                         }
                                     } else {
-                                        // Other sorts (company/role) - show up/down for date (default state)
+                                        // Other sorts (company/role) - show down arrow for date (default state)
                                         dateSortStateRef.current = "default";
-                                        return <ArrowUpDown className="w-3 h-3 text-muted-foreground" />;
+                                        return <ChevronDown className="w-3 h-3 text-muted-foreground" />;
                                     }
                                 })()}
                             </button>
