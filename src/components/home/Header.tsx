@@ -41,7 +41,7 @@ export default function Header({
                         className={header.logoWrapper}
                     >
                         <span className="font-display font-bold text-2xl tracking-tight text-foreground">
-                            applyto<span className="bg-gradient-to-r from-violet-500 to-indigo-500 bg-clip-text text-transparent">.tech</span>
+                            applyto<span className="text-indigo-500">.tech</span>
                         </span>
                     </motion.div>
 

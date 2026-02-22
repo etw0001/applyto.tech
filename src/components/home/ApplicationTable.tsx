@@ -132,7 +132,7 @@ export default function ApplicationTable({
                                                 setStatusFilter(newFilter);
                                             }
                                         }}
-                                        className={`w-1.5 h-1.5 rounded-full transition-all ${isSelected ? dotColors[status] : statusConfig[status].bgColor} hover:scale-125`}
+                                        className={`w-1.5 h-1.5 rounded-full transition-all ${isSelected ? dotColors[status] : `${dotColors[status]}/30`} hover:scale-125`}
                                         title={statusConfig[status].label}
                                     />
                                 );
@@ -252,10 +252,6 @@ export default function ApplicationTable({
                                         whileTap={{ scale: 0.98 }}
                                         data-testid={`badge-status-${app.id}`}
                                     >
-                                        {(() => {
-                                            const StatusIcon = statusConfig[app.status].icon;
-                                            return <StatusIcon className="w-3 h-3 opacity-90 group-hover/status:opacity-100 transition-opacity" />;
-                                        })()}
                                         {statusConfig[app.status].label}
                                     </motion.button>
                                     <AnimatePresence>

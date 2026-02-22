@@ -43,7 +43,7 @@ export default function StatusFooter({ applications, filteredCount, statusFilter
                             whileTap={{ scale: 0.95 }}
                             data-testid={`quick-filter-${status}`}
                         >
-                            <span className={`w-2 h-2 rounded-full ${isSelected ? dotColors[status] : statusConfig[status].bgColor}`} />
+                            <span className={`w-2 h-2 rounded-full ${isSelected ? dotColors[status] : `${dotColors[status]}/30`}`} />
                             {statusConfig[status].label}
                         </motion.button>
                     );

@@ -244,7 +244,7 @@ export default function RecommendedTab({ applications, isSignedIn, onAddToTracke
                                             ) : (
                                                 <Plus className="w-3 h-3" />
                                             )}
-                                            {isAdding ? "Adding..." : "Track"}
+                                            Track
                                         </motion.button>
                                         <a href={item.link} target="_blank" rel="noopener noreferrer" className={recommended.applyButton}>
                                             Apply

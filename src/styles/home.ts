@@ -49,7 +49,7 @@ export const modal = {
     deleteButton: "w-full flex items-center gap-3 px-3 py-3 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 transition-all text-left",
     deleteIcon: "w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4",
     toggle: (active: boolean) =>
-        `w-10 h-6 rounded-full transition-colors relative ${active ? "bg-violet-500" : "bg-muted"}`,
+        `w-10 h-6 rounded-full transition-colors relative ${active ? "bg-gradient-to-r from-violet-500 to-indigo-500" : "bg-muted"}`,
 };
 
 // ─── Stats Cards ─────────────────────────────────────────
@@ -87,7 +87,7 @@ export const recommended = {
     companyAvatar: "w-8 h-8 rounded-md bg-secondary flex items-center justify-center text-muted-foreground text-sm font-medium shrink-0",
     applyButton: "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md dark:bg-white dark:text-black dark:hover:bg-gray-100 bg-foreground text-background hover:opacity-90 text-xs font-medium transition-colors hover:scale-105 active:scale-95",
     addedButton: "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/10 text-emerald-500 text-xs font-medium cursor-default",
-    addButton: "inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-md dark:bg-gradient-to-r dark:from-violet-500 dark:to-indigo-500 dark:hover:from-violet-600 dark:hover:to-indigo-600 dark:text-white bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 text-white text-xs font-medium transition-colors hover:scale-105 active:scale-95",
+    addButton: "inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-md dark:bg-indigo-500 dark:hover:bg-indigo-600 dark:text-white bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium transition-colors hover:scale-105 active:scale-95",
     source: "text-xs text-muted-foreground flex items-center gap-1",
     emptyState: "px-5 py-12 text-center",
 };
@@ -123,7 +123,7 @@ export const toolbar = {
     dropdownItem: (active: boolean) =>
         `w-full flex items-center px-3 py-2 hover:bg-secondary/50 transition-colors text-sm ${active ? "text-foreground" : "text-muted-foreground"}`,
     clearAll: "text-xs text-muted-foreground hover:text-foreground transition-colors",
-    addButton: "bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 dark:bg-gradient-to-r dark:from-violet-500 dark:to-indigo-500 dark:hover:from-violet-600 dark:hover:to-indigo-600 text-white border-0 gap-1.5 font-medium text-sm h-8 rounded-lg shadow-sm",
+    addButton: "bg-indigo-500 hover:bg-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white border-0 gap-1.5 font-medium text-sm h-8 rounded-lg shadow-sm",
 };
 
 // ─── Application Table ───────────────────────────────────
@@ -136,7 +136,7 @@ export const table = {
     position: "text-sm text-foreground/80",
     externalLink: "text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100",
     dateText: "col-span-2 text-sm text-muted-foreground pl-4",
-    deleteButton: "p-1.5 rounded text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-all opacity-0 group-hover:opacity-100",
+    deleteButton: "p-1 rounded-full text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-all opacity-0 group-hover:opacity-100",
     statusDropdown: "absolute top-full left-0 mt-1 bg-card border border-border rounded-md shadow-xl z-[100] overflow-hidden py-1 min-w-[120px]",
     emptyWrapper: "px-5 py-12 text-center",
     emptyIcon: "w-10 h-10 rounded-lg bg-secondary flex items-center justify-center mx-auto mb-3",
@@ -145,24 +145,24 @@ export const table = {
 
 // ─── Status Badge ────────────────────────────────────────
 export const statusBadge = {
-    base: "group/status inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer backdrop-blur-sm transition-all duration-200 shadow-sm hover:shadow-md",
+    base: "group/status inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold cursor-pointer backdrop-blur-sm transition-all duration-200 shadow-sm hover:shadow-md",
     variants: (status: Status, darkMode: boolean): string => {
         const colors: Record<Status, { dark: string; light: string }> = {
             applied: {
-                dark: "bg-[#3b82f6]/15 text-[#3b82f6] shadow-[#3b82f6]/10",
-                light: "bg-[#3b82f6]/10 text-[#3b82f6] shadow-[#3b82f6]/8",
+                dark: "bg-indigo-500/15 text-indigo-500",
+                light: "bg-indigo-500/15 text-indigo-500",
             },
             interviewing: {
-                dark: "bg-[#f59e0b]/15 text-[#f59e0b] shadow-[#f59e0b]/10",
-                light: "bg-[#f59e0b]/10 text-[#f59e0b] shadow-[#f59e0b]/8",
+                dark: "bg-[#FBBC04]/15 text-[#FBBC04]",
+                light: "bg-[#FBBC04]/15 text-[#FBBC04]",
             },
             offered: {
-                dark: "bg-[#22c55e]/15 text-[#22c55e] shadow-[#22c55e]/10",
-                light: "bg-[#22c55e]/10 text-[#22c55e] shadow-[#22c55e]/8",
+                dark: "bg-emerald-500/15 text-emerald-500",
+                light: "bg-emerald-500/15 text-emerald-500",
             },
             rejected: {
-                dark: "bg-rose-500/15 text-rose-500 shadow-rose-500/10",
-                light: "bg-rose-500/10 text-rose-500 shadow-rose-500/8",
+                dark: "bg-rose-500/15 text-rose-500",
+                light: "bg-rose-500/15 text-rose-500",
             },
         };
         return darkMode ? colors[status].dark : colors[status].light;
