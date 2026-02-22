@@ -199,4 +199,35 @@
     color: hsl(var(--muted-foreground));
     pointer-events: none;
   }
+
+  @keyframes shimmer {
+
+    0%,
+    70% {
+      background-position: 200% 0;
+    }
+
+    90% {
+      background-position: -100% 0;
+    }
+
+    90.01%,
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  .text-gradient-shimmer {
+    background: linear-gradient(90deg,
+        #6366f1 0%,
+        #6366f1 40%,
+        #c4b5fd 50%,
+        #6366f1 60%,
+        #6366f1 100%);
+    background-size: 250% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
 }

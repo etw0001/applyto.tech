@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/use-auth";
 import { useApplications } from "@/hooks/use-applications";
 import { supabase } from "@/lib/supabase";
-import { mockApplications } from "@/constants/status";
 import { layout } from "@/styles/home";
 import type { Status, SortOption, UserProfile } from "@/types";
 
@@ -33,7 +32,7 @@ export default function Home() {
     deleteApplication: deleteApplicationFromDB,
   } = useApplications(authUser?.id);
 
-  const applications = (isSignedIn ? supabaseApplications : mockApplications) as import("@/types").Application[];
+  const applications = (isSignedIn ? supabaseApplications : []) as import("@/types").Application[];
 
   // ─── UI State ────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"recommended" | "custom">("custom");
@@ -73,6 +72,8 @@ export default function Home() {
             .single();
 
           if (error && error.code === "PGRST116") {
+            // Use localStorage theme if available, otherwise default to light
+            const savedTheme = localStorage.getItem("theme") || "light";
             const { data: newProfile, error: createError } = await supabase
               .from("profiles")
               .insert({
@@ -80,7 +81,7 @@ export default function Home() {
                 name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email?.split("@")[0] || "User",
                 email: authUser.email || "",
                 avatar_url: authUser.user_metadata?.avatar_url || null,
-                theme: "light",
+                theme: savedTheme,
               })
               .select()
               .single();
@@ -106,14 +107,26 @@ export default function Home() {
               avatar: data.avatar_url || authUser.user_metadata?.avatar_url || (data.name?.[0] || authUser.email?.[0] || "U").toUpperCase(),
             });
 
-            if (data.theme) {
+            // Always prioritize localStorage - it's the source of truth
+            const localTheme = localStorage.getItem("theme");
+            if (localTheme) {
+              // localStorage exists - use it and sync to database if needed
+              const isDark = localTheme === "dark";
+              // Only update state if it's different to avoid unnecessary re-renders
+              setDarkMode((prev) => (prev !== isDark ? isDark : prev));
+              if (data.theme !== localTheme) {
+                supabase.from("profiles").update({ theme: localTheme }).eq("id", authUser.id);
+              }
+            } else if (data.theme) {
+              // No localStorage, but database has theme - use database
               const isDark = data.theme === "dark";
               setDarkMode((prev) => (prev !== isDark ? isDark : prev));
               localStorage.setItem("theme", data.theme);
             } else {
+              // Neither has theme - default to current state and save
               const currentTheme = darkMode ? "dark" : "light";
-              supabase.from("profiles").update({ theme: currentTheme }).eq("id", authUser.id);
               localStorage.setItem("theme", currentTheme);
+              supabase.from("profiles").update({ theme: currentTheme }).eq("id", authUser.id);
             }
           } else {
             setUser({
@@ -132,11 +145,8 @@ export default function Home() {
         }
       } else {
         setUser(null);
-        const savedTheme = localStorage.getItem("theme");
-        if (savedTheme) {
-          const shouldBeDark = savedTheme === "dark";
-          setDarkMode((prev) => (prev !== shouldBeDark ? shouldBeDark : prev));
-        }
+        // When not signed in, just ensure localStorage is respected (initial state already handles this)
+        // Don't override the state if it's already correct
       }
     };
 
@@ -150,14 +160,21 @@ export default function Home() {
     else document.documentElement.classList.remove("dark");
     requestAnimationFrame(() => requestAnimationFrame(() => document.documentElement.classList.remove("no-transitions")));
 
-    const timeoutId = setTimeout(() => {
-      if (isSignedIn && authUser) {
-        supabase.from("profiles").update({ theme: darkMode ? "dark" : "light" }).eq("id", authUser.id);
-      }
-      localStorage.setItem("theme", darkMode ? "dark" : "light");
-    }, 100);
+    // Write to localStorage IMMEDIATELY so it persists on refresh
+    localStorage.setItem("theme", darkMode ? "dark" : "light");
 
-    return () => clearTimeout(timeoutId);
+    // Update database immediately if user is signed in
+    if (isSignedIn && authUser) {
+      supabase
+        .from("profiles")
+        .update({ theme: darkMode ? "dark" : "light" })
+        .eq("id", authUser.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Error updating theme in database:", error);
+          }
+        });
+    }
   }, [darkMode, isSignedIn, authUser]);
 
   // ─── Click Outside for User Menu ─────────────────────────
@@ -344,7 +361,13 @@ export default function Home() {
 
             <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
 
-            {activeTab === "recommended" && <RecommendedTab />}
+            <div className={activeTab === "recommended" ? "" : "hidden"}>
+              <RecommendedTab
+                applications={applications}
+                isSignedIn={isSignedIn}
+                onAddToTracker={handleAddApplication}
+              />
+            </div>
 
             {activeTab === "custom" && (
               <>

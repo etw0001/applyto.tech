@@ -75,6 +75,8 @@ export const tabs = {
 export const recommended = {
     pill: (active: boolean) =>
         `px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${active ? "bg-violet-500 text-white" : "bg-secondary text-muted-foreground hover:text-foreground"}`,
+    categoryPill: (active: boolean) =>
+        `px-3 py-1.5 rounded-full text-xs font-medium transition-colors text-center ${active ? "bg-violet-500 text-white" : "bg-secondary text-muted-foreground hover:text-foreground"}`,
     searchWrapper: "relative flex-1 max-w-sm",
     searchIcon: "absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground",
     searchInput: "pl-9 pr-8 bg-transparent border-border text-sm h-8 placeholder:text-muted-foreground focus:border-ring focus:ring-0",
@@ -84,6 +86,8 @@ export const recommended = {
     tableRow: "grid grid-cols-12 gap-4 px-5 py-3.5 items-center hover:bg-secondary/30 transition-colors group border-b border-border/50 last:border-b-0",
     companyAvatar: "w-8 h-8 rounded-md bg-secondary flex items-center justify-center text-muted-foreground text-sm font-medium shrink-0",
     applyButton: "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-violet-500/10 text-violet-500 hover:bg-violet-500/20 text-xs font-medium transition-colors hover:scale-105 active:scale-95",
+    addedButton: "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/10 text-emerald-500 text-xs font-medium cursor-default",
+    addButton: "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 text-xs font-medium transition-colors hover:scale-105 active:scale-95",
     source: "text-xs text-muted-foreground flex items-center gap-1",
     emptyState: "px-5 py-12 text-center",
 };

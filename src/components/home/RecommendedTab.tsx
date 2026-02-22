@@ -1,18 +1,26 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, X, ExternalLink, MapPin, Sparkles, Loader2, AlertTriangle, Briefcase } from "lucide-react";
+import { Search, X, ExternalLink, MapPin, Sparkles, Loader2, AlertTriangle, Briefcase, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { getRecommended, INTERNSHIP_CATEGORIES, type RecommendedInternship, type InternshipCategory } from "@/utils/getRecommended";
 import { recommended } from "@/styles/home";
+import type { Application, Status } from "@/types";
 
-export default function RecommendedTab() {
+interface RecommendedTabProps {
+    applications: Application[];
+    isSignedIn: boolean;
+    onAddToTracker: (data: { company: string; position: string; link: string; status: Status; dateApplied: string }) => Promise<void>;
+}
+
+export default function RecommendedTab({ applications, isSignedIn, onAddToTracker }: RecommendedTabProps) {
     const [internships, setInternships] = useState<RecommendedInternship[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
     const [category, setCategory] = useState<InternshipCategory | "all">("all");
     const [displayCount, setDisplayCount] = useState(100);
+    const [addingItems, setAddingItems] = useState<Set<string>>(new Set());
     const fetched = useRef(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -41,7 +49,18 @@ export default function RecommendedTab() {
         }
     }, []);
 
-    const filtered = internships
+    // Build a set of "company|role" keys from user's existing applications for fast lookup
+    const appliedKeys = new Set(
+        applications.map((app) => `${app.company.toLowerCase().trim()}|${app.position.toLowerCase().trim()}`)
+    );
+
+    const isAlreadyAdded = (item: RecommendedInternship) =>
+        appliedKeys.has(`${item.company.toLowerCase().trim()}|${item.role.toLowerCase().trim()}`);
+
+    // Exclude tracked internships from the list entirely
+    const untrackedInternships = internships.filter((item) => !isAlreadyAdded(item));
+
+    const filtered = untrackedInternships
         .filter((item) => category === "all" || item.category === category)
         .filter(
             (item) =>
@@ -51,7 +70,7 @@ export default function RecommendedTab() {
                 item.location.toLowerCase().includes(search.toLowerCase())
         );
 
-    const categoryCounts = internships.reduce<Record<string, number>>((acc, item) => {
+    const categoryCounts = untrackedInternships.reduce<Record<string, number>>((acc, item) => {
         acc[item.category] = (acc[item.category] || 0) + 1;
         return acc;
     }, {});
@@ -69,28 +88,53 @@ export default function RecommendedTab() {
             .finally(() => setLoading(false));
     };
 
+    const handleAddToTracker = async (item: RecommendedInternship) => {
+        const itemKey = `${item.company}|${item.role}`;
+        setAddingItems((prev) => new Set(prev).add(itemKey));
+        try {
+            const today = new Date().toLocaleDateString("en-US", {
+                month: "short",
+                day: "2-digit",
+                year: "numeric",
+            });
+            await onAddToTracker({
+                company: item.company,
+                position: item.role,
+                link: item.link,
+                status: "applied",
+                dateApplied: today,
+            });
+        } catch (err) {
+            console.error("Error adding to tracker:", err);
+        } finally {
+            setAddingItems((prev) => {
+                const next = new Set(prev);
+                next.delete(itemKey);
+                return next;
+            });
+        }
+    };
+
     return (
         <div>
             {/* Category filter pills */}
             <div className="flex flex-wrap items-center gap-2 mb-4">
-                <motion.button
+                <button
                     onClick={() => setCategory("all")}
-                    className={recommended.pill(category === "all")}
-                    whileHover={{ scale: 1.03 }}
-                    whileTap={{ scale: 0.97 }}
+                    className={`${recommended.pill(category === "all")} relative`}
                 >
-                    All ({internships.length})
-                </motion.button>
+                    <span className="invisible">All (9999)</span>
+                    <span className="absolute inset-0 flex items-center justify-center">All ({untrackedInternships.length})</span>
+                </button>
                 {INTERNSHIP_CATEGORIES.map((cat) => (
-                    <motion.button
+                    <button
                         key={cat}
                         onClick={() => setCategory(category === cat ? "all" : cat)}
-                        className={recommended.pill(category === cat)}
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.97 }}
+                        className={`${recommended.categoryPill(category === cat)} relative`}
                     >
-                        {cat} ({categoryCounts[cat] || 0})
-                    </motion.button>
+                        <span className="invisible">{cat} (9999)</span>
+                        <span className="absolute inset-0 flex items-center justify-center">{cat} ({categoryCounts[cat] || 0})</span>
+                    </button>
                 ))}
             </div>
 
@@ -143,39 +187,63 @@ export default function RecommendedTab() {
                 <div className={recommended.tableContainer}>
                     <div className={recommended.tableHeader}>
                         <div className="col-span-3">Company</div>
-                        <div className="col-span-4">Role</div>
+                        <div className="col-span-3">Role</div>
                         <div className="col-span-2">Location</div>
                         <div className="col-span-1">Posted</div>
-                        <div className="col-span-2 text-right">Apply</div>
+                        <div className="col-span-3 text-right">Actions</div>
                     </div>
 
                     <div className="max-h-[600px] overflow-y-auto" ref={scrollRef} onScroll={handleScroll}>
-                        {filtered.slice(0, displayCount).map((item, index) => (
-                            <div key={`${item.company}-${item.role}-${index}`} className={recommended.tableRow}>
-                                <div className="col-span-3 flex items-center gap-3">
-                                    <div className={recommended.companyAvatar}>{item.company.charAt(0)}</div>
-                                    <span className="text-sm font-medium text-foreground truncate">{item.company}</span>
+                        {filtered.slice(0, displayCount).map((item, index) => {
+                            const itemKey = `${item.company}|${item.role}`;
+                            const isAdding = addingItems.has(itemKey);
+
+                            return (
+                                <div
+                                    key={`${item.company}-${item.role}-${index}`}
+                                    className={recommended.tableRow}
+                                >
+                                    <div className="col-span-3 flex items-center gap-3">
+                                        <div className={recommended.companyAvatar}>{item.company.charAt(0)}</div>
+                                        <span className="text-sm font-medium text-foreground truncate">{item.company}</span>
+                                    </div>
+                                    <div className="col-span-3">
+                                        <span className="text-sm text-foreground/80 line-clamp-2">{item.role}</span>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                            <MapPin className="w-3 h-3 shrink-0" />
+                                            <span className="truncate">{item.location}</span>
+                                        </span>
+                                    </div>
+                                    <div className="col-span-1">
+                                        <span className="text-xs text-muted-foreground">{item.posted}</span>
+                                    </div>
+                                    <div className="col-span-3 flex justify-end gap-2">
+                                        {isSignedIn && (
+                                            <motion.button
+                                                onClick={() => handleAddToTracker(item)}
+                                                disabled={isAdding}
+                                                className={recommended.addButton}
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
+                                            >
+                                                {isAdding ? (
+                                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                                ) : (
+                                                    <Plus className="w-3 h-3" />
+                                                )}
+                                                {isAdding ? "Adding..." : "Track"}
+                                            </motion.button>
+                                        )}
+                                        <a href={item.link} target="_blank" rel="noopener noreferrer" className={recommended.applyButton}>
+                                            Apply
+                                            <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                    </div>
                                 </div>
-                                <div className="col-span-4">
-                                    <span className="text-sm text-foreground/80 line-clamp-2">{item.role}</span>
-                                </div>
-                                <div className="col-span-2">
-                                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                        <MapPin className="w-3 h-3 shrink-0" />
-                                        <span className="truncate">{item.location}</span>
-                                    </span>
-                                </div>
-                                <div className="col-span-1">
-                                    <span className="text-xs text-muted-foreground">{item.posted}</span>
-                                </div>
-                                <div className="col-span-2 flex justify-end">
-                                    <a href={item.link} target="_blank" rel="noopener noreferrer" className={recommended.applyButton}>
-                                        Apply
-                                        <ExternalLink className="w-3 h-3" />
-                                    </a>
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
 
                     {filtered.length === 0 && !loading && (
